@@ -77,12 +77,12 @@ bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
                 if(chunk[i] == ' ') {
                     verbOrKeyLength = i;
                     if(verbOrKeyLength > 20)
-                        goto on_malformed_header;
+                        throw runtime_error("malformed request");
                     currentBase = i + 1;
                     currentExpect = 1;
                 }
                 else if(!CURRENT_ISUPPER)
-                    goto on_malformed_header;
+                    throw runtime_error("malformed request");
                 break;
             case 1: // expect resource
                 if(chunk[i] == ' ') {
@@ -95,7 +95,7 @@ bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
                     currentExpect = 2;
                 }
                 else if(chunk[i] >= 0 && chunk[i] < 32)
-                    goto on_malformed_header;
+                    throw runtime_error("malformed request");
                 break;
             case 2: // expect HTTP version - HTTP/1.
                 if(chunk[i] == '.') {
@@ -106,14 +106,14 @@ bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
                        chunk[currentBase + 3] != 'P' ||
                        chunk[currentBase + 4] != '/' ||
                        chunk[currentBase + 5] != '1') {
-                        goto on_malformed_header;
+                        throw runtime_error("malformed request");
                     }
                     currentBase = i + 1;
                     currentExpect = 3;
                 }
                 else if(!CURRENT_ISUPPER &&
                         chunk[i] != '/' && chunk[i] != '1') {
-                    goto on_malformed_header;
+                    throw runtime_error("malformed request");
                 }
                 break;
             case 3: // expect HTTP subversion
@@ -125,7 +125,7 @@ bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
                     currentExpect = 100;
                 else if((chunk[i] != '0' && chunk[i] != '1') ||
                         i != currentBase)
-                    goto on_malformed_header;
+                    throw runtime_error("malformed request");
                 break;
             case 4: // expect HTTP header key
                 if(chunk[i] == ':') {
@@ -137,14 +137,14 @@ bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
                 else if(i == currentBase && chunk[i] == '\r')
                     currentExpect = 101;
                 else if(i - currentBase > 30)
-                    goto on_malformed_header;
+                    throw runtime_error("malformed request");
                 else if(CURRENT_ISUPPER)
                     headerKey[i - currentBase] = chunk[i] + 32;
                 else if(CURRENT_ISLOWER || chunk[i] == '-' || chunk[i] == '_' ||
                         CURRENT_ISNUMBER)
                     headerKey[i - currentBase] = chunk[i];
                 else
-                    goto on_malformed_header;
+                    throw runtime_error("malformed request");
                 break;
             case 5: // skip spaces between column and value
                 if(chunk[i] != ' ') {
@@ -162,21 +162,19 @@ bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
                     currentExpect = chunk[i] == '\r' ? 100 : 4;
                     break;
                 }
-                goto on_malformed_header;
+                throw runtime_error("malformed request");
             case 100: // expect \n after '\r'
-                if(chunk[i] != '\n') goto on_malformed_header;
+                if(chunk[i] != '\n') throw runtime_error("malformed request");
                 currentBase = i + 1;
                 currentExpect = 4;
                 break;
             case 101: // expect final \n
-                if(chunk[i] != '\n') goto on_malformed_header;
+                if(chunk[i] != '\n') throw runtime_error("malformed request");
                 goto entire_request_decoded;
         }
         i++;
     }
     return false;
-    on_malformed_header:
-    throw runtime_error("malformed request");
     entire_request_decoded:
     _msg = req;
     stb->pull(i + 1);

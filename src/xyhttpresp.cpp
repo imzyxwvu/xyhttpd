@@ -93,14 +93,14 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                        chunk[currentBase + 3] != 'P' ||
                        chunk[currentBase + 4] != '/' ||
                        chunk[currentBase + 5] != '1') {
-                        goto on_malformed_header;
+                        throw runtime_error("malformed response");
                     }
                     currentBase = i + 1;
                     currentExpect = 1;
                 }
                 else if(!CURRENT_ISUPPER &&
                         chunk[i] != '/' && chunk[i] != '1')
-                    goto on_malformed_header;
+                    throw runtime_error("malformed response");
                 break;
             case 1: // expect HTTP subversion
                 if(chunk[i] == ' ') {
@@ -109,7 +109,7 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                 }
                 else if((chunk[i] != '0' && chunk[i] != '1') ||
                         i != currentBase)
-                    goto on_malformed_header;
+                    throw runtime_error("malformed response");
                 break;
             case 2: // expect HTTP status code
                 if(chunk[i] == ' ') {
@@ -119,7 +119,7 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                     currentExpect = 3;
                 }
                 else if(!CURRENT_ISNUMBER)
-                    goto on_malformed_header;
+                    throw runtime_error("malformed response");
                 break;
             case 3: // skip HTTP status text
                 if(chunk[i] == '\n') {
@@ -139,12 +139,12 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                 else if(i == currentBase && chunk[i] == '\r')
                     currentExpect = 101;
                 else if(i - currentBase > 30)
-                    goto on_malformed_header;
+                    throw runtime_error("malformed response");
                 else if(CURRENT_ISLOWER || chunk[i] == '-' || chunk[i] == '_' ||
                         CURRENT_ISNUMBER || CURRENT_ISUPPER)
                     headerKey[i - currentBase] = chunk[i];
                 else
-                    goto on_malformed_header;
+                    throw runtime_error("malformed response");
                 break;
             case 5: // skip spaces between column and value
                 if(chunk[i] != ' ') {
@@ -162,21 +162,19 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                     currentExpect = chunk[i] == '\r' ? 100 : 4;
                     break;
                 }
-                goto on_malformed_header;
+                throw runtime_error("malformed response");
             case 100: // expect \n after '\r'
-                if(chunk[i] != '\n') goto on_malformed_header;
+                if(chunk[i] != '\n') throw runtime_error("malformed response");
                 currentBase = i + 1;
                 currentExpect = 4;
                 break;
             case 101: // expect final \n
-                if(chunk[i] != '\n') goto on_malformed_header;
+                if(chunk[i] != '\n') throw runtime_error("malformed response");
                 goto entire_request_decoded;
         }
         i++;
     }
     return false;
-    on_malformed_header:
-    throw runtime_error("malformed response");
     entire_request_decoded:
     _msg = resp;
     stb->pull(i + 1);
