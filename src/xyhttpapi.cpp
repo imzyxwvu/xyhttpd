@@ -63,7 +63,7 @@ void http_transaction::forward_to(const string &host, int port) {
     }
 }
 
-void http_transaction::serve_file(const string &filename, const string &mimetype) {
+void http_transaction::serve_file(const string &filename) {
     struct stat info;
     if(stat(filename.c_str(), &info)) {
         switch(errno) {
@@ -92,7 +92,6 @@ void http_transaction::serve_file(const string &filename, const string &mimetype
     }
     auto resp = make_response(200);
     resp->set_header("Last-Modified", modtime);
-    resp->set_header("Content-Type", mimetype);
     resp->set_header("Content-Length", to_string(info.st_size));
     char *buf = new char[info.st_blksize];
     size_t rest = info.st_size;
@@ -110,6 +109,13 @@ void http_transaction::serve_file(const string &filename, const string &mimetype
     close(fd);
 }
 
+void http_transaction::redirect_to(const string &dest) {
+    auto resp = make_response(302);
+    resp->set_header("Location", dest);
+    resp->set_header("Content-Length", "0");
+    flush_response();
+}
+
 void http_transaction::display_error(int code) {
     auto resp = make_response(code);
     char page[256];
@@ -119,6 +125,15 @@ void http_transaction::display_error(int code) {
     resp->set_header("Content-Type", "text/html");
     resp->set_header("Content-Length", to_string(size));
     write(page, size);
+}
+
+shared_ptr<http_response> http_transaction::make_response() {
+    if(_header_sent)
+        throw runtime_error("header already sent");
+    if(!_response) {
+        _response = shared_ptr<http_response>(new http_response(200));
+    }
+    return _response;
 }
 
 shared_ptr<http_response> http_transaction::make_response(int code) {
@@ -134,7 +149,7 @@ shared_ptr<http_response> http_transaction::make_response(int code) {
 
 void http_transaction::flush_response() {
     if(_header_sent) return;
-    if(!_response) make_response(200);
+    if(!_response) make_response();
     _response->set_header("Server", SERVER_VERSION);
     _response->set_header("Connection",
         connection->keep_alive() ? "keep-alive" : "close");
@@ -149,14 +164,4 @@ void http_transaction::write(const char *buf, int len) {
 
 void http_transaction::write(const string &buf) {
     write(buf.data(), buf.size());
-}
-
-void http_service::serve(shared_ptr<http_transaction> tx) {
-    auto resp = tx->make_response(200);
-    const string it_works = "<html>"
-        "<head><title>Welcome to XWSG</title></head>"
-        "<body><h1>It works!</h1></body></html>";
-    resp->set_header("Content-Type", "text/html");
-    resp->set_header("Content-Length", to_string(it_works.size()));
-    tx->write(it_works);
 }

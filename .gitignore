@@ -2,4 +2,5 @@
 cmake-build-*
 CMakeFiles
 CMakeCache.txt
+Makefile
 xyhttpd

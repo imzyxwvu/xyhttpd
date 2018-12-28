@@ -113,9 +113,11 @@ public:
     http_transaction(shared_ptr<http_connection> conn,
                      shared_ptr<http_request> req);
 
-    void serve_file(const string &filename, const string &mimetype);
+    void serve_file(const string &filename);
     void forward_to(const string &hostname, int port);
+    void redirect_to(const string &dest);
     void display_error(int code);
+    shared_ptr<http_response> make_response();
     shared_ptr<http_response> make_response(int code);
     const shared_ptr<http_response> get_response();
     void flush_response();
@@ -167,7 +169,7 @@ public:
     http_server(http_service *svc);
     virtual ~http_server();
 
-    void listen(const char *addr, int port = 80);
+    void listen(const char *addr, int port);
 private:
     uv_tcp_t *stream;
 
