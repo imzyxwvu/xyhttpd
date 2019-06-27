@@ -4,9 +4,11 @@
 #include "xycommon.h"
 #include "xyfiber.h"
 #include "xystream.h"
+#include "xyfcgi.h"
 
 #include <map>
 #include <uv.h>
+#include <vector>
 
 enum http_method {
     GET, HEAD, POST, PUT, DELETE, OPTIONS,
@@ -18,7 +20,7 @@ enum http_method {
 class http_request : public message {
 public:
     http_request();
-    inline http_method method();
+    inline http_method method() const;
     inline shared_ptr<string> resource() const { return _resource; }
     inline shared_ptr<string> path() const { return _path; }
     inline shared_ptr<string> query() const { return _query; }
@@ -33,12 +35,16 @@ public:
     inline void set_header(const string &key, const string &val) {
         _headers[key] = make_shared<string>(val);
     }
-    const char *method_name();
+    const char *method_name() const;
     virtual int type() const;
     virtual ~http_request();
 
     virtual int serialize_size();
     virtual void serialize(char *buf);
+
+    map<string, shared_ptr<string>>::const_iterator hbegin() const;
+    map<string, shared_ptr<string>>::const_iterator hend() const;
+
 
     class decoder : public ::decoder {
     public:
@@ -66,19 +72,17 @@ private:
 
 class http_response : public message {
 public:
-    int code;
-
     inline shared_ptr<string> header(const string &key) {
         if(_headers.find(key) == _headers.end())
             return shared_ptr<string>();
         return _headers.at(key);
     }
-    inline void set_header(const string &key, shared_ptr<string> val) {
-        _headers[key] = val;
+    inline int code() {
+        return _code;
     }
-    inline void set_header(const string &key, const string &val) {
-        _headers[key] = make_shared<string>(val);
-    }
+    virtual void set_code(int newcode);
+    virtual void set_header(const string &key, const string &val);
+    virtual void set_header(const string &key, shared_ptr<string> val);
     static const char *state_description(int code);
 
     virtual int serialize_size();
@@ -101,7 +105,9 @@ public:
         decoder &operator=(const decoder &);
     };
 private:
+    int _code;
     map<string, shared_ptr<string>> _headers;
+    vector<shared_ptr<string>> _cookies;
 
     http_response &operator=(const http_response &);
 };
@@ -115,6 +121,7 @@ public:
 
     void serve_file(const string &filename);
     void forward_to(const string &hostname, int port);
+    void forward_to(const shared_ptr<fcgi_connection> conn);
     void redirect_to(const string &dest);
     void display_error(int code);
     shared_ptr<http_response> make_response();

@@ -24,7 +24,7 @@ void http_request::set_method(const char *method) {
         throw invalid_argument("unsupported method");
 }
 
-const char *http_request::method_name() {
+const char *http_request::method_name() const {
     switch(_meth) {
     case GET: return "GET";
     case POST: return "POST";
@@ -182,7 +182,23 @@ bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
 }
 
 shared_ptr<message> http_request::decoder::msg() {
+    const char *origRes = _msg->resource()->c_str();
+    const char *queryBase = strchr(origRes, '?');
+    if(queryBase) {
+        _msg->_path = make_shared<string>(origRes, queryBase - origRes);
+        _msg->_query = make_shared<string>(queryBase + 1);
+    } else {
+        _msg->_path = _msg->resource();
+    }
     return _msg;
+}
+
+map<string, shared_ptr<string>>::const_iterator http_request::hbegin() const {
+    return _headers.cbegin();
+}
+
+map<string, shared_ptr<string>>::const_iterator http_request::hend() const {
+    return _headers.cend();
 }
 
 http_request::decoder::~decoder() {}

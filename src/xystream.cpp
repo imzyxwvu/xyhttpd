@@ -43,7 +43,7 @@ shared_ptr<message> stream::read(shared_ptr<decoder> decoder) {
     reading_fiber = fiber::running();
     while(true) {
         auto s = fiber::yield<int_status>();
-        if(s->status() > 0) {
+        if(s->status() >= 0) {
             try {
                 if(decoder->decode(buffer)) {
                     uv_read_stop(handle);
@@ -60,6 +60,8 @@ shared_ptr<message> stream::read(shared_ptr<decoder> decoder) {
         else {
             uv_read_stop(handle);
             reading_fiber.reset();
+            if(s->status() == UV_EOF)
+                return nullptr;
             throw IOERR(s->status());
         }
     }
@@ -216,12 +218,15 @@ shared_ptr<message> string_decoder::msg() {
 }
 
 bool string_decoder::decode(shared_ptr<streambuffer> &stb) {
-    if(buffer) delete buffer;
-    nbyte = stb->size();
-    buffer = new char[nbyte];
-    memcpy(buffer, stb->data(), nbyte);
-    stb->pull(nbyte);
-    return true;
+    if(stb->size() > 0) {
+        if(buffer) delete buffer;
+        nbyte = stb->size();
+        buffer = new char[nbyte];
+        memcpy(buffer, stb->data(), nbyte);
+        stb->pull(nbyte);
+        return true;
+    }
+    return false;
 }
 
 string_decoder::~string_decoder() {

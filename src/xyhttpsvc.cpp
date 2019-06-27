@@ -21,22 +21,52 @@ void http_service::serve(shared_ptr<http_transaction> tx) {
     tx->write(it_works);
 }
 
+void http_service_chain::serve(shared_ptr<http_transaction> tx) {
+    for(auto it = _svcs.cbegin(); it != _svcs.cend(); it++) {
+        (*it)->serve(tx);
+        if(tx->header_sent()) break;
+    }
+}
+
+void http_service_chain::append(shared_ptr<http_service> svc) {
+    _svcs.push_back(svc);
+}
+
+http_service_chain::~http_service_chain() {}
+
 local_file_service::local_file_service(const string &docroot)
-    : _docroot(docroot) {
+    : _docroot(nullptr) {
+        char absDocRoot[PATH_MAX];
+        if(realpath(docroot.c_str(), absDocRoot)) {
+            _docroot = make_shared<string>(absDocRoot);
+        }
         _defdocs.push_back("index.html");
         _defdocs.push_back("index.php");
         register_mimetype("html", "text/html");
+
     }
 
+void local_file_service::add_defdoc_name(const string &defdoc) {
+    _defdocs.push_back(defdoc);
+}
+
 void local_file_service::register_mimetype(const string &ext, const string &type) {
-    _mimetypes[ext] = shared_ptr<string>(new string(type));
+    _mimetypes[ext] = make_shared<string>(type);
+}
+
+void local_file_service::register_mimetype(const string &ext, shared_ptr<string> type) {
+    _mimetypes[ext] = type;
+}
+
+void local_file_service::register_fcgi(const string &ext, shared_ptr<fcgi_provider> provider) {
+    _fcgi_providers[ext] = provider;
 }
 
 void local_file_service::serve(shared_ptr<http_transaction> tx) {
-    const char *requested_res = tx->request->resource()->c_str();
+    const char *requested_res = tx->request->path()->c_str();
     const char *tail = requested_res;
     struct stat info;
-    string pathbuf = _docroot;
+    string pathbuf, fullpathbuf;
     while(requested_res) {
         tail = strchr(tail, '/');
         if(tail == requested_res) {
@@ -45,9 +75,11 @@ void local_file_service::serve(shared_ptr<http_transaction> tx) {
         }
         string pathpart(requested_res,
             tail ? tail - requested_res : strlen(requested_res));
-        if(pathpart.size() > 1)
+        if(pathpart.size() > 1) {
             pathbuf += pathpart;
-        if(stat(pathbuf.c_str(), &info) < 0) {
+            fullpathbuf = *_docroot + pathbuf;
+        }
+        if(stat(fullpathbuf.c_str(), &info) < 0) {
             switch(errno) {
                 case EACCES: tx->display_error(403); return;
                 default: return;
@@ -69,13 +101,14 @@ void local_file_service::serve(shared_ptr<http_transaction> tx) {
             tx->redirect_to(*(tx->request->resource()) + '/');
             return;
         }
-        pathbuf += "/";
+        fullpathbuf += "/";
         for(auto it = _defdocs.begin(); it != _defdocs.end(); it++) {
-            string fname = pathbuf + *it;
+            string fname = fullpathbuf + *it;
             if(stat(fname.c_str(), &info) < 0)
                 continue;
             if(S_ISREG(info.st_mode)) {
-                pathbuf = fname;
+                pathbuf = pathbuf + "/" + *it;
+                fullpathbuf = fname;
                 break;
             }
         }
@@ -83,11 +116,24 @@ void local_file_service::serve(shared_ptr<http_transaction> tx) {
     if(!S_ISREG(info.st_mode))
         return;
     const char *extpos = strrchr(pathbuf.c_str(), '.');
-    shared_ptr<http_response> resp = tx->make_response();
     if(extpos) {
         string ext(extpos + 1);
-        resp->set_header("Content-Type", _mimetypes[ext]);
+        shared_ptr<fcgi_provider> fcgiProvider = _fcgi_providers[ext];
+        if(fcgiProvider) {
+            shared_ptr<fcgi_connection> conn = fcgiProvider->get_connection();
+            if(!conn) {
+                tx->display_error(502);
+                return;
+            }
+            conn->set_env("SCRIPT_FILENAME", fullpathbuf);
+            conn->set_env("DOCUMENT_ROOT", _docroot);
+            conn->set_env("SCRIPT_NAME", pathbuf);
+            tx->forward_to(conn);
+            return;
+        } else {
+            shared_ptr<http_response> resp = tx->make_response();
+            resp->set_header("Content-Type", _mimetypes[ext]);
+        }
     }
-    cout<<pathbuf<<endl;
-    tx->serve_file(pathbuf);
+    tx->serve_file(fullpathbuf);
 }

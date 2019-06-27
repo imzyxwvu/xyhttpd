@@ -49,25 +49,52 @@ const char* http_response::state_description(int code) {
     }
 }
 
-http_response::http_response(int c) : code(c) {}
+http_response::http_response(int c) : _code(c) {}
 
 int http_response::serialize_size() {
-    int size = 15 + strlen(state_description(code));
+    int size = 15 + strlen(state_description(_code));
     for(auto it = _headers.begin(); it != _headers.end(); it++)
-        size += 4 + it->first.size() + it->second->size();
+        if(it->second)
+            size += 4 + it->first.size() + it->second->size();
+    for(auto it = _cookies.begin(); it != _cookies.end(); it++)
+        size += 14 + (*it)->size();
     return size + 2;
 }
 
 void http_response::serialize(char *buf) {
-    buf += sprintf(buf, "HTTP/1.1 %d %s\r\n", code, state_description(code));
+    buf += sprintf(buf, "HTTP/1.1 %d %s\r\n", _code, state_description(_code));
     for(auto it = _headers.begin(); it != _headers.end(); it++)
         buf += sprintf(buf, "%s: %s\r\n",
             it->first.c_str(), it->second->c_str());
+    for(auto it = _cookies.begin(); it != _cookies.end(); it++)
+        buf += sprintf(buf, "Set-Cookie: %s\r\n", (*it)->c_str());
     memcpy(buf, "\r\n", 2);
 }
 
 int http_response::type() const {
     return XY_MESSAGE_RESP;
+}
+
+void http_response::set_code(int newcode) {
+    if(newcode > 599 || newcode < 100) {
+        throw runtime_error("invalid HTTP response code");
+    }
+    _code = newcode;
+}
+
+void http_response::set_header(const string &key, shared_ptr<string> val) {
+    if(!val) return;
+    if(key == "Set-Cookie") {
+        _cookies.push_back(val);
+    } else if(key == "Status") {
+        _code = atoi(val->c_str());
+    } else {
+        _headers[key] = val;
+    }
+}
+
+void http_response::set_header(const string &key, const string &val) {
+    set_header(key, make_shared<string>(val));
 }
 
 http_response::~http_response() {}
@@ -87,19 +114,23 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
             case 0: // expect HTTP version - HTTP/1.
                 if(chunk[i] == '.') {
                     if(i - currentBase != 6 ||
-                       chunk[currentBase + 0] != 'H' ||
-                       chunk[currentBase + 1] != 'T' ||
-                       chunk[currentBase + 2] != 'T' ||
-                       chunk[currentBase + 3] != 'P' ||
-                       chunk[currentBase + 4] != '/' ||
-                       chunk[currentBase + 5] != '1') {
+                       headerKey[0] != 'H' || headerKey[1] != 'T' ||
+                       headerKey[2] != 'T' || headerKey[3] != 'P' ||
+                       headerKey[4] != '/' || headerKey[5] != '1') {
                         throw runtime_error("malformed response");
                     }
                     currentBase = i + 1;
                     currentExpect = 1;
                 }
-                else if(!CURRENT_ISUPPER &&
-                        chunk[i] != '/' && chunk[i] != '1')
+                else if(chunk[i] == ':') {
+                    resp = shared_ptr<http_response>(new http_response(200));
+                    verbOrKeyLength = i - currentBase;
+                    currentExpect = 5;
+                }
+                else if(CURRENT_ISUPPER || CURRENT_ISLOWER ||
+                        CURRENT_ISNUMBER || chunk[i] == '-' || chunk[i] == '_')
+                    headerKey[i - currentBase] = chunk[i];
+                else if(chunk[i] != '/')
                     throw runtime_error("malformed response");
                 break;
             case 1: // expect HTTP subversion
@@ -156,8 +187,9 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                 if(!(chunk[i] >= 0 && chunk[i] < 32))
                     break;
                 else if(chunk[i] == '\n' || chunk[i] == '\r') {
-                    resp->_headers[string(headerKey, verbOrKeyLength)]
-                            = shared_ptr<string>(new string(CURRENT_VALUE));
+                    resp->set_header(
+                            string(headerKey, verbOrKeyLength),
+                            make_shared<string>(CURRENT_VALUE));
                     currentBase = i + 1;
                     currentExpect = chunk[i] == '\r' ? 100 : 4;
                     break;

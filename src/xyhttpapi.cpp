@@ -34,11 +34,11 @@ void http_transaction::forward_to(const string &host, int port) {
     shared_ptr<tcp_stream> strm(new tcp_stream);
     strm->connect(host, port);
     shared_ptr<http_request> newreq(new http_request(*request));
-    newreq->set_header("X-Forwarded-For", "test");
+    newreq->set_header("X-Forwarded-For", connection->_peername);
     strm->write(newreq);
     if(postdata) strm->write(*postdata);
     shared_ptr<http_response::decoder> respdec(new http_response::decoder());
-    while(!_response || _response->code == 100)
+    while(!_response || _response->code() == 100)
         _response = strm->read<http_response>(respdec);
     if(auto len = _response->header("Content-Length")) {
         auto dec = shared_ptr<rest_decoder>(
@@ -48,18 +48,47 @@ void http_transaction::forward_to(const string &host, int port) {
             write(msg->data(), msg->serialize_size());
         }
     } 
-    else if (_response->code == 304)
+    else if (_response->code() == 304)
         flush_response();
     else {
-            cout<<"BRANCH2"<<endl;
         connection->_keep_alive = false;
         _response->set_header("Connection", "close");
         auto dec = shared_ptr<string_decoder>(new string_decoder());
         while(true) {
             auto msg = strm->read<string_message>(dec);
-            cout<<msg->serialize_size()<<endl;
             write(msg->data(), msg->serialize_size());  
         }
+    }
+}
+
+void http_transaction::forward_to(const shared_ptr<fcgi_connection> conn) {
+    conn->set_env("PATH_INFO", request->path());
+    conn->set_env("SERVER_PROTOCOL", "HTTP/1.1");
+    conn->set_env("CONTENT_TYPE", request->header("content-type"));
+    conn->set_env("CONTENT_LENGTH", request->header("content-length"));
+    conn->set_env("SERVER_SOFTWARE", SERVER_VERSION);
+    conn->set_env("REQUEST_URI", request->resource());
+    if(request->query())
+        conn->set_env("QUERY_STRING", request->query());
+    conn->set_env("REQUEST_METHOD", request->method_name());
+    conn->set_env("REMOTE_ADDR", connection->peername());
+    for(auto it = request->hbegin(); it != request->hend(); it++) {
+        char envKeyBuf[64] = "HTTP_";
+        char *dest = envKeyBuf + 5;
+        for(const char *src = it->first.c_str(); *src; src++)
+            *(dest++) = (*src == '-') ? '_' : toupper(*src);
+        conn->set_env(envKeyBuf, it->second);
+    }
+    if(postdata) conn->write(postdata);
+    _response = conn->read<http_response>(make_shared<http_response::decoder>());
+    connection->_keep_alive = false;
+    _response->set_header("Connection", "close");
+    flush_response();
+    auto dec = shared_ptr<string_decoder>(new string_decoder());
+    while(true) {
+        auto msg = conn->read<string_message>(dec);
+        if(!msg) break;
+        write(msg->data(), msg->serialize_size());
     }
 }
 
@@ -140,7 +169,7 @@ shared_ptr<http_response> http_transaction::make_response(int code) {
     if(_header_sent)
         throw runtime_error("header already sent");
     if(_response) {
-        _response->code = code;
+        _response->set_code(code);
     } else {
         _response = shared_ptr<http_response>(new http_response(code));
     }
