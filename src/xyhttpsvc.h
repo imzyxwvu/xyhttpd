@@ -4,6 +4,7 @@
 #include "xyhttp.h"
 #include "xyfcgi.h"
 #include <vector>
+#include <ostream>
 
 class http_service_chain : public http_service {
 public:
@@ -34,6 +35,14 @@ private:
     vector<string> _defdocs;
     map<string, shared_ptr<string>> _mimetypes;
     map<string, shared_ptr<fcgi_provider>> _fcgi_providers;
+};
+
+class logger_service : public http_service {
+public:
+    logger_service(ostream &os);
+    virtual void serve(shared_ptr<http_transaction> tx);
+private:
+    ostream &_os;
 };
 
 #endif

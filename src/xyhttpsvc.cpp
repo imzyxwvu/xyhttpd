@@ -5,13 +5,6 @@
 #include <sstream>
 
 void http_service::serve(shared_ptr<http_transaction> tx) {
-    cout<<"["<<timelabel()<<fmt(" %s] %s %s%s",
-        tx->connection->peername()->c_str(),
-        tx->request->method_name(),
-        tx->request->header("host")->c_str(),
-        tx->request->resource()->c_str())<<endl;
-    tx->forward_to("222.24.62.120", 80);
-    return;
     auto resp = tx->make_response(200);
     const string it_works = "<html>"
         "<head><title>Welcome to XWSG</title></head>"
@@ -120,8 +113,11 @@ void local_file_service::serve(shared_ptr<http_transaction> tx) {
         string ext(extpos + 1);
         shared_ptr<fcgi_provider> fcgiProvider = _fcgi_providers[ext];
         if(fcgiProvider) {
-            shared_ptr<fcgi_connection> conn = fcgiProvider->get_connection();
-            if(!conn) {
+            shared_ptr<fcgi_connection> conn;
+            try {
+                conn = fcgiProvider->get_connection();
+            }
+            catch(runtime_error &ex) {
                 tx->display_error(502);
                 return;
             }
@@ -136,4 +132,14 @@ void local_file_service::serve(shared_ptr<http_transaction> tx) {
         }
     }
     tx->serve_file(fullpathbuf);
+}
+
+logger_service::logger_service(ostream &os) : _os(os) {}
+
+void logger_service::serve(shared_ptr<http_transaction> tx) {
+    _os<<"["<<timelabel()<<fmt(" %s] %s %s%s",
+            tx->connection->peername()->c_str(),
+            tx->request->method_name(),
+            tx->request->header("host")->c_str(),
+            tx->request->resource()->c_str())<<endl;
 }

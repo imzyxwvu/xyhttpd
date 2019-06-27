@@ -11,6 +11,7 @@ int main() {
                 (new local_file_service("htdocs"));
         svc_localfile->register_fcgi("php",
                 shared_ptr<fcgi_provider>(new tcp_fcgi_provider("127.0.0.1", 9000)));
+        services->append(make_shared<logger_service>(cout));
         services->append(svc_localfile);
         server.listen("0.0.0.0", 8080);
     }

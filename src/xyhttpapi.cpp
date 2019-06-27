@@ -56,6 +56,7 @@ void http_transaction::forward_to(const string &host, int port) {
         auto dec = shared_ptr<string_decoder>(new string_decoder());
         while(true) {
             auto msg = strm->read<string_message>(dec);
+            if(!msg) break;
             write(msg->data(), msg->serialize_size());  
         }
     }
