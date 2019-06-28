@@ -160,8 +160,7 @@ public:
         return _peername;
     }
 private:
-    bool _keep_alive;
-    bool _upgraded;
+    bool _keep_alive, _upgraded;
     shared_ptr<stream> _strm;
     shared_ptr<string> _peername;
     shared_ptr<http_service> _svc;
@@ -176,9 +175,12 @@ public:
     http_server(http_service *svc);
     virtual ~http_server();
 
+    virtual void start_thread(shared_ptr<stream> strm, shared_ptr<string> pname);
+
     void listen(const char *addr, int port);
-private:
-    uv_tcp_t *stream;
+    virtual void do_listen(int backlog);
+protected:
+    uv_tcp_t *_server;
 
     http_server(const http_server &);
     http_server &operator=(const http_server &);

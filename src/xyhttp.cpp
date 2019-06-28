@@ -54,7 +54,7 @@ void http_connection::invoke_service(shared_ptr<http_transaction> tx) {
         resp->set_header("Content-Type", "text/html");
         resp->set_header("Content-Length", to_string(ptr - page));
         tx->write(page, ptr - page);
-        delete page;
+        delete[] page;
     }
     catch(exception &ex) {
         cerr<<"["<<timelabel()<<" "<<*peername()<<"] ";
@@ -72,17 +72,17 @@ void http_connection::invoke_service(shared_ptr<http_transaction> tx) {
         resp->set_header("Content-Type", "text/html");
         resp->set_header("Content-Length", to_string(size));
         tx->write(page, size);
-        delete page;
+        delete[] page;
     }
 }
 
 http_server::http_server(shared_ptr<http_service> svc) : service(svc) {
-    stream = (uv_tcp_t *)malloc(sizeof(uv_tcp_t));
-    if(uv_tcp_init(uv_default_loop(), stream) < 0) {
-        free(stream);
+    _server = (uv_tcp_t *)malloc(sizeof(uv_tcp_t));
+    if(uv_tcp_init(uv_default_loop(), _server) < 0) {
+        free(_server);
         throw runtime_error("failed to initialize libuv TCP stream");
     }
-    stream->data = this;
+    _server->data = this;
 }
 
 http_server::http_server(http_service *svc)
@@ -108,15 +108,23 @@ static void http_server_on_connection(uv_stream_t* strm, int status) {
     http_server *self = (http_server *)strm->data;
     if(status >= 0) {
         tcp_stream *client = new tcp_stream();
-        if(client->accept(strm) < 0) {
+        try {
+            client->accept(strm);
+        }
+        catch(exception &ex) {
             delete client;
+            cout<<ex.what()<<endl;
             return;
         }
-        shared_ptr<fiber> f = fiber::make(http_service_loop,
-            new http_connection(self->service, shared_ptr<stream>(client),
-                                client->getpeername()->straddr()));
-        f->resume();
+        self->start_thread(shared_ptr<stream>(client),
+                           client->getpeername()->straddr());
     }
+}
+
+void http_server::start_thread(shared_ptr<stream> strm, shared_ptr<string> pname) {
+    shared_ptr<fiber> f = fiber::make(http_service_loop,
+            new http_connection(service, strm, pname));
+    f->resume();
 }
 
 void http_server::listen(const char *addr, int port) {
@@ -124,16 +132,20 @@ void http_server::listen(const char *addr, int port) {
     if(uv_ip4_addr(addr, port, (struct sockaddr_in*)&saddr) &&
        uv_ip6_addr(addr, port, (struct sockaddr_in6*)&saddr))
         throw invalid_argument("invalid IP address or port");
-    int r = uv_tcp_bind(stream, (struct sockaddr *)&saddr, 0);
+    int r = uv_tcp_bind(_server, (struct sockaddr *)&saddr, 0);
     if(r < 0)
         throw runtime_error(uv_strerror(r));
-    r = uv_listen((uv_stream_t *)stream, 80, http_server_on_connection);
+    do_listen(64);
+}
+
+void http_server::do_listen(int backlog) {
+    int r = uv_listen((uv_stream_t *)_server, backlog, http_server_on_connection);
     if(r < 0)
         throw runtime_error(uv_strerror(r));
 }
 
 http_server::~http_server() {
-    if(stream) {
-        uv_close((uv_handle_t *)stream, (uv_close_cb) free);
+    if(_server) {
+        uv_close((uv_handle_t *)_server, (uv_close_cb) free);
     }
 }

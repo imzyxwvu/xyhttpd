@@ -12,8 +12,10 @@ stream::stream() : buffer(new streambuffer()) {
     _wreq.data = this;
 }
 
-int stream::accept(uv_stream_t *svr) {
-    return uv_accept(svr, handle);
+void stream::accept(uv_stream_t *svr) {
+    int r = uv_accept(svr, handle);
+    if(r < 0)
+        throw IOERR(r);
 }
 
 static void stream_on_alloc(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -101,6 +103,10 @@ void stream::write(shared_ptr<message> msg) {
 
 void stream::write(const string &str) {
     write(str.data(), str.size());
+}
+
+bool stream::has_tls() {
+    return false;
 }
 
 stream::~stream() {

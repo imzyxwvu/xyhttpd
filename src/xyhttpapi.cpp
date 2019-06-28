@@ -73,6 +73,8 @@ void http_transaction::forward_to(const shared_ptr<fcgi_connection> conn) {
         conn->set_env("QUERY_STRING", request->query());
     conn->set_env("REQUEST_METHOD", request->method_name());
     conn->set_env("REMOTE_ADDR", connection->peername());
+    if(connection->_strm->has_tls())
+        conn->set_env("HTTPS", "on");
     for(auto it = request->hbegin(); it != request->hend(); it++) {
         char envKeyBuf[64] = "HTTP_";
         char *dest = envKeyBuf + 5;

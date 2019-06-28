@@ -1,3 +1,4 @@
+#include <iostream>
 #include "xyfiber.h"
 
 ucontext_t fiber::maincontext;
@@ -15,7 +16,12 @@ fiber::fiber(void (*func)(void *)) : entry(func) {
 
 void fiber_wrapper(shared_ptr<fiber> *f, void *data)
 {
-    (*f)->invoke(data);
+    try {
+        (*f)->invoke(data);
+    }
+    catch(exception &ex) {
+        cerr<<"["<<timelabel()<<" "<<f->get()<<"] "<<ex.what()<<endl;
+    }
     delete f;
     fiber::yield();
 }

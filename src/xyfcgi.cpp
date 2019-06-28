@@ -49,7 +49,7 @@ fcgi_message::fcgi_message(fcgi_message::message_type t, int requestId, const ch
 
 fcgi_message::~fcgi_message() {
     if(_payload) {
-        delete _payload;
+        delete[] _payload;
     }
 }
 

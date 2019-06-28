@@ -31,13 +31,14 @@ public:
     shared_ptr<streambuffer> buffer;
     shared_ptr<fiber> reading_fiber, writing_fiber;
 
-    virtual int accept(uv_stream_t *);
+    virtual void accept(uv_stream_t *);
     template<class T>
     inline shared_ptr<T> read(shared_ptr<decoder> dec) {
         return dynamic_pointer_cast<T>(read(dec));
     }
     virtual shared_ptr<message> read(shared_ptr<decoder>);
     virtual void write(const char *buf, int length);
+    virtual bool has_tls();
     void write(shared_ptr<message> msg);
     void write(const string &str);
     virtual ~stream();
