@@ -11,10 +11,10 @@ public:
     virtual ~tls_stream();
 
     void _put_incoming(const char *buf, int length);
+    virtual void connect(const string &host, int port);
     virtual shared_ptr<message> read(shared_ptr<decoder>);
     virtual void write(const char *buf, int length);
     virtual void accept(uv_stream_t *);
-    virtual void do_handshake();
     virtual bool has_tls();
 private:
     SSL *_ssl;
@@ -23,6 +23,7 @@ private:
     bool _handshake_ok, _fallen_back, _chelo_recv;
 
     tls_stream();
+    void do_handshake();
     bool handle_want(int r);
 };
 

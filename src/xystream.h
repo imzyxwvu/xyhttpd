@@ -69,7 +69,7 @@ private:
 class tcp_stream : public stream {
 public:
     tcp_stream();
-    void connect(const string &host, int port);
+    virtual void connect(const string &host, int port);
     shared_ptr<ip_endpoint> getpeername();
 };
 

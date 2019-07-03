@@ -172,6 +172,14 @@ bool tls_stream::has_tls() {
     return !_fallen_back;
 }
 
+void tls_stream::connect(const string &host, int port) {
+    if(_handshake_ok)
+        throw RTERR("TLS socket already connected");
+    tcp_stream::connect(host, port);
+    SSL_set_connect_state(_ssl);
+    _chelo_recv = true;
+}
+
 tls_stream::~tls_stream() {
     if(_ssl) SSL_free(_ssl);
 }
