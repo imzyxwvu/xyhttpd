@@ -159,6 +159,7 @@ public:
     inline shared_ptr<string> peername() {
         return _peername;
     }
+    bool has_tls();
 private:
     bool _keep_alive, _upgraded;
     shared_ptr<stream> _strm;

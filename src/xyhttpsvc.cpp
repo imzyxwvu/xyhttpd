@@ -143,3 +143,21 @@ void logger_service::serve(shared_ptr<http_transaction> tx) {
             tx->request->header("host")->c_str(),
             tx->request->resource()->c_str())<<endl;
 }
+
+tls_filter_service::tls_filter_service(int code) : _code(code) {}
+
+void tls_filter_service::serve(shared_ptr<http_transaction> tx) {
+    if(!tx->connection->has_tls()) {
+        auto str = fmt("<!DOCTYPE html><html><head>"
+                       "<title>XWSG TLS Error %d</title></head>"
+                       "<body><h1>%d %s</h1><p>"
+                       "An HTTP request was sent to an HTTPS port."
+                       "</p></body></html>",
+                       _code, _code, http_response::state_description(_code));
+        auto resp = tx->make_response(_code);
+        resp->set_header("Content-Type", "text/html");
+        resp->set_header("Content-Length", to_string(str.size()));
+        tx->flush_response();
+        tx->write(str.data(), str.size());
+    }
+}

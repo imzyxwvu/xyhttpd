@@ -45,4 +45,12 @@ private:
     ostream &_os;
 };
 
+class tls_filter_service : public http_service {
+public:
+    tls_filter_service(int code);
+    virtual void serve(shared_ptr<http_transaction> tx);
+private:
+    int _code;
+};
+
 #endif

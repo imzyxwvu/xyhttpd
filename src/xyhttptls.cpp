@@ -18,7 +18,8 @@ static const char *sslerror_to_string(int err_code)
     }
 }
 
-tls_stream::tls_stream(SSL_CTX *ctx) : _handshake_ok(false) {
+tls_stream::tls_stream(SSL_CTX *ctx) :
+_handshake_ok(false), _fallen_back(false), _chelo_recv(false) {
     _ssl = SSL_new(ctx);
     if(!_ssl)
         throw RTERR("Failed to create SSL instance");
@@ -41,27 +42,42 @@ void tls_stream::accept(uv_stream_t *svr) {
 }
 
 void tls_stream::do_handshake() {
-    while(true) {
+    while(!_handshake_ok) {
         int r = SSL_get_error(_ssl, SSL_do_handshake(_ssl));
         if(handle_want(r))
             continue;
         else if(r == SSL_ERROR_NONE) {
             _handshake_ok = true;
             return;
+        } else {
+            throw RTERR("TLS Error: %s\n", sslerror_to_string(r));
         }
-        throw RTERR("TLS error: %s", sslerror_to_string(r));
     }
 }
 
 void tls_stream::_put_incoming(const char *buf, int length) {
-    BIO_write(_rxbio, buf, length);
+    if(_chelo_recv) {
+        BIO_write(_rxbio, buf, length);
+    } else {
+        if(buf[0] == 22 && !_fallen_back) {
+            BIO_write(_rxbio, buf, length);
+            _chelo_recv = true;
+        } else {
+            stream::buffer->append((void *)buf, length);
+            _fallen_back = true;
+            _handshake_ok = true;
+            SSL_free(_ssl);
+            _ssl = nullptr;
+        }
+    }
 }
 
 shared_ptr<message> tls_stream::read(shared_ptr<decoder> decoder) {
     if(reading_fiber)
         throw RTERR("reading from a stream occupied by another fiber");
-    if(!_handshake_ok)
-        do_handshake();
+    do_handshake();
+    if(_fallen_back)
+        return stream::read(decoder);
     if(buffer->size() > 0)
         if(decoder->decode(buffer))
             return decoder->msg();
@@ -92,6 +108,11 @@ shared_ptr<message> tls_stream::read(shared_ptr<decoder> decoder) {
 }
 
 void tls_stream::write(const char *buf, int length) {
+    do_handshake();
+    if(_fallen_back) {
+        stream::write(buf, length);
+        return;
+    }
     while(true) {
         int r = SSL_get_error(_ssl, SSL_write(_ssl, buf, length));
         if(handle_want(r))
@@ -148,11 +169,11 @@ bool tls_stream::handle_want(int r) {
 }
 
 bool tls_stream::has_tls() {
-    return true;
+    return !_fallen_back;
 }
 
 tls_stream::~tls_stream() {
-    SSL_free(_ssl);
+    if(_ssl) SSL_free(_ssl);
 }
 
 https_server::https_server(shared_ptr<http_service> svc) : http_server(svc) {
@@ -193,7 +214,6 @@ static void https_server_on_connection(uv_stream_t* strm, int status) {
                            client->getpeername()->straddr());
     }
 }
-
 
 void https_server::do_listen(int backlog) {
     int r = uv_listen((uv_stream_t *)_server, backlog, https_server_on_connection);

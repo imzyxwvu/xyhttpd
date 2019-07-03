@@ -10,6 +10,10 @@ http_connection::http_connection(
 
 shared_ptr<http_request> http_connection::next_request() {
     shared_ptr<http_request> _req = _strm->read<http_request>(_reqdec);
+    if(!_req) {
+        _keep_alive = false;
+        return nullptr;
+    }
     shared_ptr<string> connhdr = _req->header("connection");
     if(connhdr) {
         _keep_alive = connhdr->find("keep-alive", 0, 10) != string::npos ||
@@ -76,6 +80,10 @@ void http_connection::invoke_service(shared_ptr<http_transaction> tx) {
     }
 }
 
+bool http_connection::has_tls() {
+    return _strm->has_tls();
+}
+
 http_server::http_server(shared_ptr<http_service> svc) : service(svc) {
     _server = (uv_tcp_t *)malloc(sizeof(uv_tcp_t));
     if(uv_tcp_init(uv_default_loop(), _server) < 0) {
@@ -94,11 +102,13 @@ static void http_service_loop(void *data) {
         shared_ptr<http_request> req;
         try {
             req = conn->next_request();
-            shared_ptr<http_transaction> tx(
-                new http_transaction(conn, req));
+            if(!req) break;
+            shared_ptr<http_transaction> tx(new http_transaction(conn, req));
             conn->invoke_service(tx);
         }
         catch(exception &ex) {
+            cerr<<"["<<timelabel()<<" "<<conn->peername()->c_str()<<"] "
+                <<ex.what()<<endl;
             break;
         }
     }

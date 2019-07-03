@@ -20,7 +20,7 @@ private:
     SSL *_ssl;
     BIO *_txbio, *_rxbio;
     int _eof_status;
-    bool _handshake_ok;
+    bool _handshake_ok, _fallen_back, _chelo_recv;
 
     tls_stream();
     bool handle_want(int r);
