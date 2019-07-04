@@ -70,4 +70,21 @@ private:
     map<string, shared_ptr<http_service>> _svcmap;
 };
 
+class proxy_pass_service : public http_service {
+public:
+    proxy_pass_service();
+    virtual void serve(shared_ptr<http_transaction> tx);
+    virtual void append(shared_ptr<ip_endpoint> ep);
+    virtual void append(const string &host, int port);
+    inline shared_ptr<ip_endpoint> &operator[](int i) {
+        return _svcs.at(i);
+    }
+    inline int count() const {
+        return _svcs.size();
+    }
+private:
+    vector<shared_ptr<ip_endpoint>> _svcs;
+    int _cur;
+};
+
 #endif

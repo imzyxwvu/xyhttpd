@@ -70,7 +70,10 @@ class tcp_stream : public stream {
 public:
     tcp_stream();
     virtual void connect(const string &host, int port);
+    virtual void connect(shared_ptr<ip_endpoint> ep);
     shared_ptr<ip_endpoint> getpeername();
+private:
+    virtual void connect(const sockaddr *sa);
 };
 
 class unix_stream : public stream {

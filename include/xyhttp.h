@@ -121,7 +121,8 @@ public:
 
     void serve_file(const string &filename);
     void forward_to(const string &hostname, int port);
-    void forward_to(const shared_ptr<fcgi_connection> conn);
+    void forward_to(shared_ptr<ip_endpoint> ep);
+    void forward_to(shared_ptr<fcgi_connection> conn);
     void redirect_to(const string &dest);
     void display_error(int code);
     shared_ptr<http_response> make_response();

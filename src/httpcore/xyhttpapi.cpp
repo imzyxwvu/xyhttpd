@@ -29,10 +29,15 @@ http_transaction::http_transaction(
 }
 
 void http_transaction::forward_to(const string &host, int port) {
+    shared_ptr<ip_endpoint> ep(new ip_endpoint(host, port));
+    return forward_to(ep);
+}
+
+void http_transaction::forward_to(shared_ptr<ip_endpoint> ep) {
     if(_header_sent)
         throw RTERR("header already sent");
     shared_ptr<tcp_stream> strm(new tcp_stream);
-    strm->connect(host, port);
+    strm->connect(ep);
     shared_ptr<http_request> newreq(new http_request(*request));
     newreq->set_header("X-Forwarded-For", connection->_peername);
     strm->write(newreq);
@@ -42,12 +47,12 @@ void http_transaction::forward_to(const string &host, int port) {
         _response = strm->read<http_response>(respdec);
     if(auto len = _response->header("Content-Length")) {
         auto dec = shared_ptr<rest_decoder>(
-            new rest_decoder(atoi(len->c_str())));
+                new rest_decoder(atoi(len->c_str())));
         while(dec->more()) {
             auto msg = strm->read<string_message>(dec);
             write(msg->data(), msg->serialize_size());
         }
-    } 
+    }
     else if (_response->code() == 304)
         flush_response();
     else {
@@ -57,12 +62,12 @@ void http_transaction::forward_to(const string &host, int port) {
         while(true) {
             auto msg = strm->read<string_message>(dec);
             if(!msg) break;
-            write(msg->data(), msg->serialize_size());  
+            write(msg->data(), msg->serialize_size());
         }
     }
 }
 
-void http_transaction::forward_to(const shared_ptr<fcgi_connection> conn) {
+void http_transaction::forward_to(shared_ptr<fcgi_connection> conn) {
     conn->set_env("PATH_INFO", request->path());
     conn->set_env("SERVER_PROTOCOL", "HTTP/1.1");
     conn->set_env("CONTENT_TYPE", request->header("content-type"));

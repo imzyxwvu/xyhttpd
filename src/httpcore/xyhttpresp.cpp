@@ -127,8 +127,8 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                     verbOrKeyLength = i - currentBase;
                     currentExpect = 5;
                 }
-                else if(CURRENT_ISUPPER || CURRENT_ISLOWER ||
-                        CURRENT_ISNUMBER || chunk[i] == '-' || chunk[i] == '_')
+                else if(CURRENT_ISUPPER || CURRENT_ISLOWER || CURRENT_ISNUMBER ||
+                        chunk[i] == '-' || chunk[i] == '_' || chunk[i] == '/')
                     headerKey[i - currentBase] = chunk[i];
                 else if(chunk[i] != '/')
                     throw runtime_error("malformed response");

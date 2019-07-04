@@ -135,9 +135,17 @@ static void tcp_on_connect(uv_connect_t* req, int status) {
 void tcp_stream::connect(const string &host, int port)
 {
     ip_endpoint ep(host, port);
+    connect(ep.sa());
+}
+
+void tcp_stream::connect(shared_ptr<ip_endpoint> ep) {
+    connect(ep->sa());
+}
+
+void tcp_stream::connect(const sockaddr *sa) {
     uv_connect_t *req = new uv_connect_t;
     req->data = this;
-    int r = uv_tcp_connect(req, (uv_tcp_t *)handle, ep.sa(), tcp_on_connect);
+    int r = uv_tcp_connect(req, (uv_tcp_t *)handle, sa, tcp_on_connect);
     if(r < 0) {
         throw IOERR(r);
         delete req;

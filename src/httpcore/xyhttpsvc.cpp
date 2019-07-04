@@ -219,3 +219,22 @@ void host_dispatch_service::serve(shared_ptr<http_transaction> tx) {
     else if(_default)
         _default->serve(tx);
 }
+
+proxy_pass_service::proxy_pass_service() : _cur(0) {}
+
+void proxy_pass_service::append(shared_ptr<ip_endpoint> ep) {
+    _svcs.push_back(ep);
+}
+
+void proxy_pass_service::append(const string &host, int port) {
+    append(make_shared<ip_endpoint>(host, port));
+}
+
+void proxy_pass_service::serve(shared_ptr<http_transaction> tx) {
+    if(count() == 0)
+        return;
+    if(_cur >= count())
+        _cur = 0;
+    shared_ptr<ip_endpoint> ep = _svcs[_cur++];
+    tx->forward_to(ep);
+}

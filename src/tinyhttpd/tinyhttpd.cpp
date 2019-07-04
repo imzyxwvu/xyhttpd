@@ -21,12 +21,13 @@ int main(int argc, char *argv[])
     int port = 8080;
     shared_ptr<local_file_service> local_file_svc(
             new local_file_service(pwd()));
+    shared_ptr<proxy_pass_service> proxy_svc(new proxy_pass_service);
     char *portBase;
     char suffix[16];
-    char fcgiHandler[NAME_MAX];
+    char backend[NAME_MAX];
     int opt;
     shared_ptr<fcgi_provider> fcgiProvider;
-    while ((opt = getopt(argc, argv, "r:b:f:d:h")) != -1) {
+    while ((opt = getopt(argc, argv, "r:b:f:d:p:h")) != -1) {
         switch(opt) {
             case 'r':
                 local_file_svc->set_document_root(optarg);
@@ -51,17 +52,26 @@ int main(int argc, char *argv[])
                 }
                 *portBase = 0;
                 strcpy(suffix, optarg);
-                strcpy(fcgiHandler, portBase + 1);
-                portBase = strchr(fcgiHandler, ':');
+                strcpy(backend, portBase + 1);
+                portBase = strchr(backend, ':');
                 if(portBase) {
                     *portBase = 0;
                     fcgiProvider = make_shared<tcp_fcgi_provider>(
-                            fcgiHandler, atoi(portBase + 1));
+                            backend, atoi(portBase + 1));
                 } else {
-                    fcgiProvider = make_shared<unix_fcgi_provider>(
-                            fcgiHandler);
+                    fcgiProvider = make_shared<unix_fcgi_provider>(backend);
                 }
                 local_file_svc->register_fcgi(suffix, fcgiProvider);
+                break;
+            case 'p':
+                strcpy(backend, optarg);
+                portBase = strchr(backend, ':');
+                if(!portBase) {
+                    proxy_svc->append(backend, 80);
+                    break;
+                }
+                *portBase = 0;
+                proxy_svc->append(backend, atoi(portBase + 1));
                 break;
             case 'd':
                 local_file_svc->add_defdoc_name(optarg);
@@ -69,13 +79,14 @@ int main(int argc, char *argv[])
             default:
                 printf("Invalid argument - %c.\n\n", opt);
             case 'h':
-                printf("Usage: %s [-h] [-r htdocs] [-b 0.0.0.0:8080] "
-                       "[-f FcgiProvider] [-d index.php]\n\n", argv[0]);
+                printf("Usage: %s [-h] [-r htdocs] [-b 0.0.0.0:8080] [-d index.php]\n"
+                       "       [-f FcgiProvider] [-p 127.0.0.1:90]\n\n", argv[0]);
                 puts("   -h\tShow help information");
                 puts("   -r\tSet document root");
                 puts("   -b\tSet bind address and port");
-                puts("   -f\tAdd FastCGI suffix and handler");
                 puts("   -d\tAdd default document search name");
+                puts("   -f\tAdd FastCGI suffix and handler");
+                puts("   -p\tAdd proxy pass backend service");
                 puts("");
                 return EXIT_FAILURE;
         }
@@ -86,6 +97,8 @@ int main(int argc, char *argv[])
     try {
         svcChain->append(make_shared<logger_service>(cout));
         svcChain->append(local_file_svc);
+        if(proxy_svc->count() > 0)
+            svcChain->append(proxy_svc);
         server.listen(bindAddr, port);
     }
     catch(runtime_error &ex) {
