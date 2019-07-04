@@ -29,15 +29,18 @@ http_service_chain::~http_service_chain() {}
 
 local_file_service::local_file_service(const string &docroot)
     : _docroot(nullptr) {
-        char absDocRoot[PATH_MAX];
-        if(realpath(docroot.c_str(), absDocRoot)) {
-            _docroot = make_shared<string>(absDocRoot);
-        }
-        _defdocs.push_back("index.html");
-        _defdocs.push_back("index.php");
+        set_document_root(docroot);
         register_mimetype("html", "text/html");
-
     }
+
+void local_file_service::set_document_root(const string &docroot) {
+    char absDocRoot[PATH_MAX];
+    if(realpath(docroot.c_str(), absDocRoot)) {
+        _docroot = make_shared<string>(absDocRoot);
+    } else {
+        throw RTERR("failed to resolve document root");
+    }
+}
 
 void local_file_service::add_defdoc_name(const string &defdoc) {
     _defdocs.push_back(defdoc);

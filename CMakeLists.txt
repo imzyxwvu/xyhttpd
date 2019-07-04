@@ -13,3 +13,6 @@ target_link_libraries(iocore uv ${OPENSSL_LIBRARIES})
 
 add_executable(xyhttpd src/main.cpp)
 target_link_libraries(xyhttpd iocore)
+
+add_executable(tinyhttpd src/tinyhttpd/tinyhttpd.cpp)
+target_link_libraries(tinyhttpd iocore)

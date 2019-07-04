@@ -25,6 +25,10 @@ private:
 class local_file_service : public http_service {
 public:
     local_file_service(const string &docroot);
+    inline shared_ptr<string> document_root() {
+        return _docroot;
+    }
+    void set_document_root(const string &docroot);
     void add_defdoc_name(const string &defdoc);
     void register_mimetype(const string &ext, const string &type);
     void register_mimetype(const string &ext, shared_ptr<string> type);
