@@ -58,8 +58,8 @@ int main(int argc, char *argv[])
                     fcgiProvider = make_shared<tcp_fcgi_provider>(
                             fcgiHandler, atoi(portBase + 1));
                 } else {
-                    printf("Invalid FastCGI handler - %s.\n", optarg);
-                    return EXIT_FAILURE;
+                    fcgiProvider = make_shared<unix_fcgi_provider>(
+                            fcgiHandler);
                 }
                 local_file_svc->register_fcgi(suffix, fcgiProvider);
                 break;
@@ -70,12 +70,13 @@ int main(int argc, char *argv[])
                 printf("Invalid argument - %c.\n\n", opt);
             case 'h':
                 printf("Usage: %s [-h] [-r htdocs] [-b 0.0.0.0:8080] "
-                       "[-f php=FcgiProvider] [-d index.php]\n\n", argv[0]);
+                       "[-f FcgiProvider] [-d index.php]\n\n", argv[0]);
                 puts("   -h\tShow help information");
                 puts("   -r\tSet document root");
                 puts("   -b\tSet bind address and port");
                 puts("   -f\tAdd FastCGI suffix and handler");
                 puts("   -d\tAdd default document search name");
+                puts("");
                 return EXIT_FAILURE;
         }
     }

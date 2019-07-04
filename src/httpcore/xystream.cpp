@@ -158,6 +158,34 @@ shared_ptr<ip_endpoint> tcp_stream::getpeername() {
     return shared_ptr<ip_endpoint>(new ip_endpoint(&address));
 }
 
+unix_stream::unix_stream() {
+    uv_pipe_t *h = (uv_pipe_t *)malloc(sizeof(uv_pipe_t));
+    if(uv_pipe_init(uv_default_loop(), h, 0) < 0) {
+        free(h);
+        throw runtime_error("failed to initialize libuv UNIX stream");
+    }
+    handle = (uv_stream_t *)h;
+    handle->data = this;
+}
+
+static void pipe_on_connect(uv_connect_t* req, int status) {
+    stream *self = (stream *)req->data;
+    delete req;
+    self->writing_fiber->event = int_status::make(status);
+    self->writing_fiber->resume();
+}
+
+void unix_stream::connect(const shared_ptr<string> path)
+{
+    uv_connect_t *req = new uv_connect_t;
+    req->data = this;
+    uv_pipe_connect(req, (uv_pipe_t *)handle, path->c_str(), pipe_on_connect);
+    writing_fiber = fiber::running();
+    auto s = fiber::yield<int_status>();
+    writing_fiber.reset();
+    if(s->status() != 0)
+        throw IOERR(s->status());
+}
 
 ip_endpoint::ip_endpoint(struct sockaddr_storage *sa) {
     if (sa->ss_family == AF_INET)

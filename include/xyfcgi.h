@@ -96,4 +96,14 @@ private:
     int _port;
 };
 
+class unix_fcgi_provider : public fcgi_provider {
+public:
+    virtual shared_ptr<fcgi_connection> get_connection();
+    unix_fcgi_provider(const string &path);
+    unix_fcgi_provider(shared_ptr<string> path);
+    inline shared_ptr<string> path() { return _path; }
+private:
+    shared_ptr<string> _path;
+};
+
 #endif

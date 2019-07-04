@@ -168,3 +168,16 @@ shared_ptr<fcgi_connection> tcp_fcgi_provider::get_connection()
     strm->connect(_hostip, _port);
     return shared_ptr<fcgi_connection>(new fcgi_connection(strm, 1));
 }
+
+unix_fcgi_provider::unix_fcgi_provider(const string &p)
+    : _path(make_shared<string>(p)) {}
+
+unix_fcgi_provider::unix_fcgi_provider(shared_ptr<string> p)
+    : _path(p) {}
+
+shared_ptr<fcgi_connection> unix_fcgi_provider::get_connection()
+{
+    shared_ptr<unix_stream> strm(new unix_stream);
+    strm->connect(_path);
+    return shared_ptr<fcgi_connection>(new fcgi_connection(strm, 1));
+}

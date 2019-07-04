@@ -73,6 +73,12 @@ public:
     shared_ptr<ip_endpoint> getpeername();
 };
 
+class unix_stream : public stream {
+public:
+    unix_stream();
+    virtual void connect(const shared_ptr<string> path);
+};
+
 class string_message : public message {
 public:
     string_message(const char *buf, int len);
