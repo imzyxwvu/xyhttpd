@@ -27,8 +27,7 @@ static void stream_on_alloc(uv_handle_t* handle, size_t suggested_size, uv_buf_t
 static void stream_on_data(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     stream *self = (stream *)handle->data;
     if(nread > 0) self->buffer->enlarge(nread);
-    self->reading_fiber->event = int_status::make(nread);
-    self->reading_fiber->resume();
+    self->reading_fiber->resume(int_status::make(nread));
 }
 
 shared_ptr<message> stream::read(shared_ptr<decoder> decoder) {
@@ -44,6 +43,8 @@ shared_ptr<message> stream::read(shared_ptr<decoder> decoder) {
         throw IOERR(r);
     reading_fiber = fiber::running();
     while(true) {
+        //TODO: let stream_on_data directly invoke decoder
+        //to reduce context switches
         auto s = fiber::yield<int_status>();
         if(s->status() >= 0) {
             try {
@@ -72,8 +73,7 @@ shared_ptr<message> stream::read(shared_ptr<decoder> decoder) {
 static void stream_on_write(uv_write_t *req, int status)
 {
     stream *self = (stream *)req->data;
-    self->writing_fiber->event = int_status::make(status);
-    self->writing_fiber->resume();
+    self->writing_fiber->resume(int_status::make(status));
 }
 
 void stream::write(const char *chunk, int length)

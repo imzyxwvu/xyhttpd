@@ -20,6 +20,10 @@ public:
     }
     static shared_ptr<wakeup_event> yield();
     void resume();
+    inline void resume(shared_ptr<wakeup_event> evt) {
+        event = evt;
+        resume();
+    }
     static shared_ptr<fiber> make(void (*func)(void *), void *data);
     void invoke(void *data);
     inline static shared_ptr<fiber> running() {
