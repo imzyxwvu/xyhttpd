@@ -148,16 +148,71 @@ tls_filter_service::tls_filter_service(int code) : _code(code) {}
 
 void tls_filter_service::serve(shared_ptr<http_transaction> tx) {
     if(!tx->connection->has_tls()) {
-        auto str = fmt("<!DOCTYPE html><html><head>"
-                       "<title>XWSG TLS Error %d</title></head>"
-                       "<body><h1>%d %s</h1><p>"
-                       "An HTTP request was sent to an HTTPS port."
-                       "</p></body></html>",
-                       _code, _code, http_response::state_description(_code));
-        auto resp = tx->make_response(_code);
-        resp->set_header("Content-Type", "text/html");
-        resp->set_header("Content-Length", to_string(str.size()));
-        tx->flush_response();
-        tx->write(str.data(), str.size());
+        if(_code == 302) {
+            tx->redirect_to(fmt("https://%s%s",
+                    tx->request->header("host")->c_str(),
+                    tx->request->resource()->c_str()));
+        } else {
+            auto str = fmt("<!DOCTYPE html><html><head>"
+                           "<title>XWSG TLS Error %d</title></head>"
+                           "<body><h1>%d %s</h1><p>"
+                           "An HTTP request was sent to an HTTPS port."
+                           "</p></body></html>",
+                           _code, _code, http_response::state_description(_code));
+            auto resp = tx->make_response(_code);
+            resp->set_header("Content-Type", "text/html");
+            resp->set_header("Content-Length", to_string(str.size()));
+            tx->flush_response();
+            tx->write(str.data(), str.size());
+        }
     }
+}
+
+void host_dispatch_service::register_host(const string &hostname, shared_ptr<http_service> svc) {
+    if(!svc) {
+        unregister_host(hostname);
+        return;
+    }
+    _svcmap[hostname] = svc;
+    if(!_default)
+        _default = svc;
+}
+
+void host_dispatch_service::unregister_host(const string &hostname) {
+    _svcmap.erase(hostname);
+}
+
+void host_dispatch_service::set_default(shared_ptr<http_service> svc) {
+    if(!svc)
+        throw RTERR("provided service is null");
+    _default = svc;
+}
+
+string host_dispatch_service::normalize_hostname(shared_ptr<string> hostname) {
+    char buf[NAME_MAX];
+    if(hostname->size() > NAME_MAX - 1)
+        throw RTERR("hostname too long");
+    strcpy(buf, hostname->c_str());
+    char *portBase = strchr(buf, ':');
+    if(portBase) *portBase = 0;
+    int length = strlen(buf);
+    if(buf[length - 1] == '.') {
+        buf[length - 1] = 0;
+        length--;
+    }
+    return string(buf, length);
+}
+
+void host_dispatch_service::serve(shared_ptr<http_transaction> tx) {
+    auto host = tx->request->header("host");
+    if(!host) {
+        tx->display_error(400);
+        return;
+    }
+    string hostName = normalize_hostname(host);
+    auto svc = _svcmap[hostName];
+    if(svc)
+        svc->serve(tx);
+    else if(_default)
+        _default->serve(tx);
 }

@@ -53,4 +53,17 @@ private:
     int _code;
 };
 
+class host_dispatch_service : public http_service {
+public:
+    host_dispatch_service();
+    void register_host(const string &hostname, shared_ptr<http_service> svc);
+    void unregister_host(const string &hostname);
+    void set_default(shared_ptr<http_service> svc);
+    static string normalize_hostname(shared_ptr<string> hostname);
+    virtual void serve(shared_ptr<http_transaction> tx);
+private:
+    shared_ptr<http_service> _default;
+    map<string, shared_ptr<http_service>> _svcmap;
+};
+
 #endif
