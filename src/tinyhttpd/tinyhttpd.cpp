@@ -27,7 +27,9 @@ int main(int argc, char *argv[])
     char backend[NAME_MAX];
     int opt;
     shared_ptr<fcgi_provider> fcgiProvider;
-    while ((opt = getopt(argc, argv, "r:b:f:d:p:h")) != -1) {
+    local_file_svc->register_mimetype("html", "text/html");
+    local_file_svc->register_mimetype("css", "text/css");
+    while ((opt = getopt(argc, argv, "r:b:f:d:p:t:h")) != -1) {
         switch(opt) {
             case 'r':
                 local_file_svc->set_document_root(optarg);
@@ -63,6 +65,16 @@ int main(int argc, char *argv[])
                 }
                 local_file_svc->register_fcgi(suffix, fcgiProvider);
                 break;
+            case 't':
+                portBase = strchr(optarg, '=');
+                if(!portBase) {
+                    printf("Invalid MIME type definition - %s.\n", optarg);
+                    return EXIT_FAILURE;
+                }
+                *portBase = 0;
+                strcpy(suffix, optarg);
+                local_file_svc->register_mimetype(suffix, string(portBase + 1));
+                break;
             case 'p':
                 strcpy(backend, optarg);
                 portBase = strchr(backend, ':');
@@ -80,12 +92,13 @@ int main(int argc, char *argv[])
                 printf("Invalid argument - %c.\n\n", opt);
             case 'h':
                 printf("Usage: %s [-h] [-r htdocs] [-b 0.0.0.0:8080] [-d index.php]\n"
-                       "       [-f FcgiProvider] [-p 127.0.0.1:90]\n\n", argv[0]);
+                       "       [-f FcgiProvider] [-t sfx=MIME] [-p 127.0.0.1:90]\n\n", argv[0]);
                 puts("   -h\tShow help information");
                 puts("   -r\tSet document root");
                 puts("   -b\tSet bind address and port");
                 puts("   -d\tAdd default document search name");
                 puts("   -f\tAdd FastCGI suffix and handler");
+                puts("   -t\tAdd MIME Type for suffix.");
                 puts("   -p\tAdd proxy pass backend service");
                 puts("");
                 return EXIT_FAILURE;

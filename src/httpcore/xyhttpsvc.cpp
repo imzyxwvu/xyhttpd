@@ -20,7 +20,6 @@ http_service_chain::~http_service_chain() {}
 local_file_service::local_file_service(const string &docroot)
     : _docroot(nullptr) {
         set_document_root(docroot);
-        register_mimetype("html", "text/html");
     }
 
 void local_file_service::set_document_root(const string &docroot) {
