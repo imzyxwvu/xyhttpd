@@ -4,16 +4,6 @@
 #include <iostream>
 #include <sstream>
 
-void http_service::serve(shared_ptr<http_transaction> tx) {
-    auto resp = tx->make_response(200);
-    const string it_works = "<html>"
-        "<head><title>Welcome to XWSG</title></head>"
-        "<body><h1>It works!</h1></body></html>";
-    resp->set_header("Content-Type", "text/html");
-    resp->set_header("Content-Length", to_string(it_works.size()));
-    tx->write(it_works);
-}
-
 void http_service_chain::serve(shared_ptr<http_transaction> tx) {
     for(auto it = _svcs.cbegin(); it != _svcs.cend(); it++) {
         (*it)->serve(tx);

@@ -146,7 +146,7 @@ private:
 
 class http_service {
 public:
-    virtual void serve(shared_ptr<http_transaction> tx);
+    virtual void serve(shared_ptr<http_transaction> tx) = 0;
 };
 
 class http_connection {
