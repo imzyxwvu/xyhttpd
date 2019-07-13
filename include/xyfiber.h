@@ -26,7 +26,7 @@ public:
     }
     static shared_ptr<fiber> make(void (*func)(void *), void *data);
     void invoke(void *data);
-    inline static shared_ptr<fiber> running() {
+    inline static shared_ptr<fiber> current() {
         return levels.top();
     }
     inline static bool in_fiber() {
@@ -37,7 +37,7 @@ private:
     fiber(const fiber &);
     ucontext_t context;
     char stack[0x20000];
-    bool terminated;
+    bool _terminated;
     void (*entry)(void *data);
     shared_ptr<fiber> self;
     static shared_ptr<fiber> breathe;

@@ -3,8 +3,12 @@
 #include <unistd.h>
 
 #include "xyhttp.h"
+#include "xywebsocket.h"
 
-const string http_transaction::SERVER_VERSION("XWSG/18.12 (xwsg.xuejietech.cn)");
+#include <openssl/sha.h> // used by http_transaction::accept_websocket
+
+const string http_transaction::SERVER_VERSION("xyhttpd/19.07 (xwsg.0xspot.com)");
+const string http_transaction::WEBSOCKET_MAGIC("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
 
 http_transaction::http_transaction(
     shared_ptr<http_connection> conn, shared_ptr<http_request> req) :
@@ -146,6 +150,25 @@ void http_transaction::serve_file(const string &filename) {
     close(fd);
 }
 
+shared_ptr<websocket> http_transaction::accept_websocket() {
+    if(request->method() != GET)
+        throw RTERR("Invalid HTTP method: GET expected, got %s",
+                request->method_name());
+    auto wskey = request->header("sec-websocket-key");
+    if(!request->header("upgrade") || !wskey)
+        throw RTERR("Headers necessary for WebSocket handshake not present");
+    string wsaccept = *wskey + WEBSOCKET_MAGIC;
+    unsigned char shabuf[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)wsaccept.data(), wsaccept.size(), shabuf);
+    auto resp = make_response(101);
+    resp->set_header("Upgrade", "websocket");
+    resp->set_header("Sec-WebSocket-Accept",
+            base64_encode(shabuf, SHA_DIGEST_LENGTH));
+    shared_ptr<websocket> ws(new websocket(connection->upgrade()));
+    flush_response();
+    return ws;
+}
+
 void http_transaction::redirect_to(const string &dest) {
     auto resp = make_response(302);
     resp->set_header("Location", dest);
@@ -188,8 +211,12 @@ void http_transaction::flush_response() {
     if(_header_sent) return;
     if(!_response) make_response();
     _response->set_header("Server", SERVER_VERSION);
-    _response->set_header("Connection",
-        connection->keep_alive() ? "keep-alive" : "close");
+    if(connection->_upgraded) {
+        _response->set_header("Connection", "upgrade");
+    } else {
+        _response->set_header("Connection",
+                              connection->keep_alive() ? "keep-alive" : "close");
+    }
     connection->_strm->write(_response);
     _header_sent = true;
 }

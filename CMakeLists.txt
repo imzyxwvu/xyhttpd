@@ -7,7 +7,7 @@ include_directories(include)
 
 find_package(OpenSSL)
 
-set(SOURCE_FILES src/httpcore/xystreambuffer.cpp include/xyhttp.h src/httpcore/xyhttpapi.cpp src/httpcore/xyhttprequest.cpp src/httpcore/xyhttpresp.cpp src/httpcore/xyhttpsvc.cpp src/httpcore/xyhttp.cpp src/httpcore/xyfcgi.cpp include/xyfiber.h src/httpcore/xyfiber.cpp include/xystream.h src/httpcore/xystream.cpp src/httpcore/xylog.cpp src/httpcore/xyhttptls.cpp)
+set(SOURCE_FILES src/httpcore/xystreambuffer.cpp src/httpcore/xybase64.cpp include/xyhttp.h src/httpcore/xyhttpapi.cpp src/httpcore/xyhttprequest.cpp src/httpcore/xyhttpresp.cpp src/httpcore/xyhttpsvc.cpp src/httpcore/xyhttp.cpp src/httpcore/xyfcgi.cpp include/xyfiber.h src/httpcore/xyfiber.cpp include/xystream.h src/httpcore/xystream.cpp src/httpcore/xylog.cpp src/httpcore/xyhttptls.cpp src/httpcore/xywebsocket.cpp)
 add_library(iocore ${SOURCE_FILES})
 target_link_libraries(iocore uv ${OPENSSL_LIBRARIES})
 

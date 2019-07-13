@@ -60,7 +60,7 @@ void local_file_service::serve(shared_ptr<http_transaction> tx) {
         }
         string pathpart(requested_res,
             tail ? tail - requested_res : strlen(requested_res));
-        if(pathpart.size() > 1) {
+        if(pathpart.size() > 0) {
             pathbuf += pathpart;
             fullpathbuf = *_docroot + pathbuf;
         }

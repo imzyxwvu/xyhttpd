@@ -154,7 +154,7 @@ bool tls_stream::handle_want(int r) {
             throw logic_error("reading from a stream outside a fiber");
         if((r = uv_read_start(handle, tls_stream_on_alloc, tls_stream_on_data)) < 0)
             throw IOERR(r);
-        reading_fiber = fiber::running();
+        reading_fiber = fiber::current();
         auto s = fiber::yield<int_status>();
         uv_read_stop(handle);
         reading_fiber.reset();

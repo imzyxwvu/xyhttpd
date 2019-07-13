@@ -28,6 +28,11 @@ bool http_connection::keep_alive() {
     return _keep_alive && !_upgraded;
 }
 
+shared_ptr<stream> http_connection::upgrade() {
+    _upgraded = true;
+    return _strm;
+}
+
 void http_connection::invoke_service(shared_ptr<http_transaction> tx) {
     try {
         _svc->serve(tx);

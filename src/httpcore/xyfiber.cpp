@@ -30,7 +30,7 @@ shared_ptr<fiber> fiber::make(void (*entry)(void *), void *data) {
     shared_ptr<fiber> f(new fiber(entry));
     f->self = f;
     makecontext(&f->context, (void(*)(void))fiber_wrapper, 2, new shared_ptr<fiber>(f), data);
-    f->terminated = false;
+    f->_terminated = false;
     return f;
 }
 
@@ -39,13 +39,13 @@ void fiber::invoke(void *data) {
         entry(data);
     }
     catch(...) {}
-    terminated = true;
+    _terminated = true;
     self.reset();
 }
 
 shared_ptr<wakeup_event> fiber::yield() {
     if(levels.empty())
-        throw runtime_error("yielding outside a fiber");
+        throw RTERR("yielding outside a fiber");
     breathe = levels.top();
     levels.pop();
     shared_ptr<wakeup_event> &evt = breathe->event;
@@ -55,7 +55,9 @@ shared_ptr<wakeup_event> fiber::yield() {
 }
 
 void fiber::resume() {
-    if (!terminated) {
+    if(_terminated)
+        throw RTERR("resuming terminated fiber");
+    if (!_terminated) {
         ucontext_t *from = levels.empty() ?
                            &maincontext : &levels.top()->context;
         levels.push(self);

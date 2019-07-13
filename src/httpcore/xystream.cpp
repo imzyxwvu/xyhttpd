@@ -41,7 +41,7 @@ shared_ptr<message> stream::read(shared_ptr<decoder> decoder) {
     int r;
     if((r = uv_read_start(handle, stream_on_alloc, stream_on_data)) < 0)
         throw IOERR(r);
-    reading_fiber = fiber::running();
+    reading_fiber = fiber::current();
     while(true) {
         //TODO: let stream_on_data directly invoke decoder
         //to reduce context switches
@@ -86,7 +86,7 @@ void stream::write(const char *chunk, int length)
     buf.len = length;
     if((r = uv_write(&_wreq, handle, &buf, 1, stream_on_write)) < 0)
         throw IOERR(r);
-    writing_fiber = fiber::running();
+    writing_fiber = fiber::current();
     auto s = fiber::yield<int_status>();
     writing_fiber.reset();
     if(s->status() != 0)
@@ -150,7 +150,7 @@ void tcp_stream::connect(const sockaddr *sa) {
         throw IOERR(r);
         delete req;
     }
-    writing_fiber = fiber::running();
+    writing_fiber = fiber::current();
     auto s = fiber::yield<int_status>();
     writing_fiber.reset();
     if(s->status() != 0)
@@ -188,7 +188,7 @@ void unix_stream::connect(const shared_ptr<string> path)
     uv_connect_t *req = new uv_connect_t;
     req->data = this;
     uv_pipe_connect(req, (uv_pipe_t *)handle, path->c_str(), pipe_on_connect);
-    writing_fiber = fiber::running();
+    writing_fiber = fiber::current();
     auto s = fiber::yield<int_status>();
     writing_fiber.reset();
     if(s->status() != 0)

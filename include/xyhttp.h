@@ -20,7 +20,7 @@ enum http_method {
 class http_request : public message {
 public:
     http_request();
-    inline http_method method() const;
+    inline http_method method() const { return _meth; };
     inline shared_ptr<string> resource() const { return _resource; }
     inline shared_ptr<string> path() const { return _path; }
     inline shared_ptr<string> query() const { return _query; }
@@ -44,7 +44,6 @@ public:
 
     map<string, shared_ptr<string>>::const_iterator hbegin() const;
     map<string, shared_ptr<string>>::const_iterator hend() const;
-
 
     class decoder : public ::decoder {
     public:
@@ -125,6 +124,7 @@ public:
     void forward_to(shared_ptr<fcgi_connection> conn);
     void redirect_to(const string &dest);
     void display_error(int code);
+    shared_ptr<class websocket> accept_websocket();
     shared_ptr<http_response> make_response();
     shared_ptr<http_response> make_response(int code);
     const shared_ptr<http_response> get_response();
@@ -138,6 +138,7 @@ public:
     const shared_ptr<http_request> request;
     const shared_ptr<http_connection> connection;
     static const string SERVER_VERSION;
+    static const string WEBSOCKET_MAGIC;
     shared_ptr<string> postdata;
 private:
     bool _header_sent;
@@ -154,9 +155,10 @@ public:
     http_connection(shared_ptr<http_service> svc,
                     shared_ptr<stream> strm,
                     shared_ptr<string> pname);
-    shared_ptr<http_request> next_request();
-    void invoke_service(shared_ptr<http_transaction> tx);
-    bool keep_alive();
+    virtual shared_ptr<http_request> next_request();
+    virtual shared_ptr<stream> upgrade();
+    virtual void invoke_service(shared_ptr<http_transaction> tx);
+    virtual bool keep_alive();
     inline shared_ptr<string> peername() {
         return _peername;
     }
