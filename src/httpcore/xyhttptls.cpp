@@ -1,4 +1,5 @@
 #include <iostream>
+#include <openssl/err.h>
 #include "xyhttptls.h"
 
 static const char *sslerror_to_string(int err_code)
@@ -7,7 +8,7 @@ static const char *sslerror_to_string(int err_code)
     {
         case SSL_ERROR_NONE: return "SSL_ERROR_NONE";
         case SSL_ERROR_ZERO_RETURN: return "SSL_ERROR_ZERO_RETURN";
-        case SSL_ERROR_SSL: return "SSL_ERROR_SSL";
+        case SSL_ERROR_SSL: return ERR_reason_error_string(ERR_get_error());
         case SSL_ERROR_WANT_READ: return "SSL_ERROR_WANT_READ";
         case SSL_ERROR_WANT_WRITE: return "SSL_ERROR_WANT_WRITE";
         case SSL_ERROR_WANT_X509_LOOKUP: return "SSL_ERROR_WANT_X509_LOOKUP";
@@ -18,9 +19,9 @@ static const char *sslerror_to_string(int err_code)
     }
 }
 
-tls_stream::tls_stream(SSL_CTX *ctx) :
+tls_stream::tls_stream(const tls_context &ctx) :
 _handshake_ok(false), _fallen_back(false), _chelo_recv(false) {
-    _ssl = SSL_new(ctx);
+    _ssl = SSL_new(ctx.ctx());
     if(!_ssl)
         throw RTERR("Failed to create SSL instance");
     _txbio = BIO_new(BIO_s_mem());
@@ -50,7 +51,7 @@ void tls_stream::do_handshake() {
             _handshake_ok = true;
             return;
         } else {
-            throw RTERR("TLS Error: %s\n", sslerror_to_string(r));
+            throw RTERR("TLS Error: %s", sslerror_to_string(r));
         }
     }
 }
@@ -184,26 +185,65 @@ tls_stream::~tls_stream() {
     if(_ssl) SSL_free(_ssl);
 }
 
-https_server::https_server(shared_ptr<http_service> svc) : http_server(svc) {
-    _ctx = SSL_CTX_new(TLSv1_method());
+tls_context::tls_context() {
+    _ctx = SSL_CTX_new(TLS_method());
     if(!_ctx)
         throw RTERR("Failed to create SSL CTX instance");
 }
 
-https_server::https_server(http_service* svc)
-    : https_server(shared_ptr<http_service>(svc)) {}
+tls_context::tls_context(const tls_context &ctx) : _ctx(ctx._ctx) {
+    SSL_CTX_up_ref(_ctx);
+}
 
-https_server::~https_server() {
+tls_context::tls_context(SSL_CTX *ctx) : _ctx(ctx) {
+    SSL_CTX_up_ref(_ctx);
+}
+
+void tls_context::use_certificate(const char *file) {
+    if(!SSL_CTX_use_certificate_chain_file(_ctx, file))
+        throw RTERR("Failed to use certificate file: %s",
+                ERR_reason_error_string(ERR_get_error()));
+}
+
+void tls_context::use_certificate(const char *file, const char *key) {
+    use_certificate(file);
+    SSL_CTX_use_PrivateKey_file(_ctx, key, SSL_FILETYPE_PEM);
+}
+
+static int tls_sni_callback(SSL *ssl, int *ad, void *arg) {
+    const char* hostName = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+
+}
+
+void tls_context::register_context(const string &hostname, tls_context &ctx) {
+    if(_others.empty()) {
+        SSL_CTX_set_tlsext_servername_callback(_ctx, tls_sni_callback);
+        SSL_CTX_set_tlsext_servername_arg(_ctx, this);
+    }
+    _others[hostname] = ctx;
+}
+
+void tls_context::unregister_context(const string &hostname) {
+    _others.erase(hostname);
+}
+
+tls_context::~tls_context() {
     SSL_CTX_free(_ctx);
 }
 
-SSL_CTX* https_server::ctx() {
+https_server::https_server(tls_context ctx, shared_ptr<http_service> svc)
+: http_server(svc), _ctx(ctx) {}
+
+https_server::https_server(shared_ptr<http_service> svc) : http_server(svc) {}
+
+https_server::~https_server() {}
+
+tls_context https_server::ctx() {
     return _ctx;
 }
 
 void https_server::use_certificate(const char *file, const char *key) {
-    SSL_CTX_use_certificate_chain_file(_ctx, file);
-    SSL_CTX_use_PrivateKey_file(_ctx, key, SSL_FILETYPE_PEM);
+    _ctx.use_certificate(file, key);
 }
 
 static void https_server_on_connection(uv_stream_t* strm, int status) {

@@ -26,10 +26,13 @@ int main(int argc, char *argv[])
     char suffix[16];
     char backend[NAME_MAX];
     int opt;
+    tls_context ctx;
+    bool useTLS = false;
     shared_ptr<fcgi_provider> fcgiProvider;
+    shared_ptr<http_server> server;
     local_file_svc->register_mimetype("html", "text/html");
     local_file_svc->register_mimetype("css", "text/css");
-    while ((opt = getopt(argc, argv, "r:b:f:d:p:t:h")) != -1) {
+    while ((opt = getopt(argc, argv, "r:b:f:d:p:t:s:h")) != -1) {
         switch(opt) {
             case 'r':
                 local_file_svc->set_document_root(optarg);
@@ -45,6 +48,20 @@ int main(int argc, char *argv[])
                         return EXIT_FAILURE;
                     }
                 }
+                break;
+            case 's':
+                if(server) {
+                    printf("Duplicate -s.\n");
+                    return EXIT_FAILURE;
+                }
+                portBase = strchr(optarg, ':');
+                if(portBase) {
+                    *portBase = 0;
+                    ctx.use_certificate(optarg, portBase + 1);
+                } else {
+                    ctx.use_certificate(optarg);
+                }
+                useTLS = true;
                 break;
             case 'f':
                 portBase = strchr(optarg, '=');
@@ -78,41 +95,49 @@ int main(int argc, char *argv[])
             case 'p':
                 strcpy(backend, optarg);
                 portBase = strchr(backend, ':');
-                if(!portBase) {
+                if(portBase) {
+                    *portBase = 0;
+                    proxy_svc->append(backend, atoi(portBase + 1));
+                } else {
                     proxy_svc->append(backend, 80);
-                    break;
                 }
-                *portBase = 0;
-                proxy_svc->append(backend, atoi(portBase + 1));
                 break;
             case 'd':
                 local_file_svc->add_defdoc_name(optarg);
                 break;
             default:
-                printf("Invalid argument - %c.\n\n", opt);
             case 'h':
-                printf("Usage: %s [-h] [-r htdocs] [-b 0.0.0.0:8080] [-d index.php]\n"
+                printf("\n"
+                       "Usage: %s [-h] [-r htdocs] [-b 0.0.0.0:8080] [-d index.php]\n"
                        "       [-f FcgiProvider] [-t sfx=MIME] [-p 127.0.0.1:90]\n\n", argv[0]);
-                puts("   -h\tShow help information");
-                puts("   -r\tSet document root");
+                puts("   -h\tShow this help information");
+                puts("   -r\tSet path to document root directory. If not set, current working ");
+                puts("     \tdirectory is used for convenience file sharing.");
                 puts("   -b\tSet bind address and port");
-                puts("   -d\tAdd default document search name");
-                puts("   -f\tAdd FastCGI suffix and handler");
+                puts("   -s\tEnable TLS and use provided X509 certificate chain : PEM key pair");
+                puts("   -d\tAdd default document search name.");
+                puts("   -f\tAdd dynamic page suffix and its FastCGI handler.");
+                puts("     \tTCP IP:port pair or UNIX domain socket path is accepted.");
                 puts("   -t\tAdd MIME Type for suffix.");
-                puts("   -p\tAdd proxy pass backend service");
+                puts("   -p\tAdd proxy pass backend service. If multiple services are defined,");
+                puts("     \tthey will be used in a round-robin machanism for load balancing.");
                 puts("");
                 return EXIT_FAILURE;
         }
     }
     signal(SIGPIPE, SIG_IGN);
     shared_ptr<http_service_chain> svcChain(new http_service_chain());
-    http_server server(svcChain);
     try {
+        if(useTLS) svcChain->append(make_shared<tls_filter_service>(302));
         svcChain->append(make_shared<logger_service>(cout));
         svcChain->append(local_file_svc);
         if(proxy_svc->count() > 0)
             svcChain->append(proxy_svc);
-        server.listen(bindAddr, port);
+        if(useTLS)
+            server = make_shared<https_server>(ctx, svcChain);
+        else
+            server = make_shared<http_server>(svcChain);
+        server->listen(bindAddr, port);
     }
     catch(runtime_error &ex) {
         printf("Failed to bind port %d: %s\n", port, ex.what());
