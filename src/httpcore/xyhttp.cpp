@@ -40,9 +40,9 @@ void http_connection::invoke_service(shared_ptr<http_transaction> tx) {
             tx->display_error(404);
     }
     catch(extended_runtime_error &ex) {
-        cerr<<"["<<timelabel()<<" "<<*peername()<<"] ";
-        cerr<<ex.filename()<<":"<<ex.lineno()<<": "<<ex.what()<<endl;
         if(tx->header_sent()) {
+            cerr<<"["<<timelabel()<<" "<<*peername()<<"] ";
+            cerr<<ex.filename()<<":"<<ex.lineno()<<": "<<ex.what()<<endl;
             _keep_alive = false;
             return;
         }
@@ -66,9 +66,8 @@ void http_connection::invoke_service(shared_ptr<http_transaction> tx) {
         delete[] page;
     }
     catch(exception &ex) {
-        cerr<<"["<<timelabel()<<" "<<*peername()<<"] ";
-        cout<<ex.what()<<endl;
         if(tx->header_sent()) {
+            cerr<<"["<<timelabel()<<" "<<*peername()<<"] "<<ex.what()<<endl;
             _keep_alive = false;
             return;
         }
