@@ -105,6 +105,10 @@ void http_transaction::forward_to(shared_ptr<fcgi_connection> conn) {
 }
 
 void http_transaction::serve_file(const string &filename) {
+    if(request->method() != GET && request->method() != HEAD) {
+        display_error(405);
+        return;
+    }
     struct stat info;
     if(stat(filename.c_str(), &info)) {
         switch(errno) {
@@ -126,14 +130,18 @@ void http_transaction::serve_file(const string &filename) {
         flush_response();
         return;
     }
+    auto resp = make_response(200);
+    resp->set_header("Last-Modified", modtime);
+    resp->set_header("Content-Length", to_string(info.st_size));
+    if(request->method() == HEAD) {
+        flush_response();
+        return;
+    }
     int fd = open(filename.c_str(), O_RDONLY);
     if(fd < 0) {
         display_error(403);
         return;
     }
-    auto resp = make_response(200);
-    resp->set_header("Last-Modified", modtime);
-    resp->set_header("Content-Length", to_string(info.st_size));
     char *buf = new char[info.st_blksize];
     size_t rest = info.st_size;
     while(rest > 0) {
@@ -151,9 +159,11 @@ void http_transaction::serve_file(const string &filename) {
 }
 
 shared_ptr<websocket> http_transaction::accept_websocket() {
-    if(request->method() != GET)
-        throw RTERR("Invalid HTTP method: GET expected, got %s",
-                request->method_name());
+    if(request->method() != GET) {
+        display_error(405);
+        throw RTERR("WebSocket negotiation expects GET, got %s",
+                    request->method_name());
+    }
     auto wskey = request->header("sec-websocket-key");
     if(!request->header("upgrade") || !wskey)
         throw RTERR("Headers necessary for WebSocket handshake not present");

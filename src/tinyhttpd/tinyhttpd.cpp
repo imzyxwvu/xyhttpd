@@ -181,13 +181,13 @@ int main(int argc, char *argv[])
     if(daemonize) become_daemon();
     shared_ptr<http_service_chain> svcChain(new http_service_chain());
     try {
-        if(useTLS) svcChain->append(make_shared<tls_filter_service>(302));
+        if(useTLS) svcChain->append<tls_filter_service>(302);
         if(daemonize && !logStream)
             logStream = new ofstream(fmt("/tmp/tinyhttpd-%d-access.log", getpid()));
         if(logStream)
-            svcChain->append(make_shared<logger_service>(*logStream));
+            svcChain->append<logger_service>(*logStream);
         else
-            svcChain->append(make_shared<logger_service>(cout));
+            svcChain->append<logger_service>(cout);
         svcChain->append(local_file_svc);
         if(proxy_svc->count() > 0)
             svcChain->append(proxy_svc);

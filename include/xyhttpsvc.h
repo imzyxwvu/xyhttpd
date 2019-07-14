@@ -5,13 +5,21 @@
 #include "xyfcgi.h"
 #include <vector>
 #include <ostream>
+#include <regex>
 
 class http_service_chain : public http_service {
 public:
-    ~http_service_chain();
-
     virtual void serve(shared_ptr<http_transaction> tx);
     virtual void append(shared_ptr<http_service> svc);
+    template<typename _Tp, typename... _Args>
+    inline void append(_Args&&... __args) {
+        append(make_shared<_Tp>(std::forward<_Args>(__args)...));
+    }
+    virtual void route(const string &r, shared_ptr<http_service> svc);
+    template<typename _Tp, typename... _Args>
+    inline void route(const string &r, _Args&&... __args) {
+        route(r, make_shared<_Tp>(std::forward<_Args>(__args)...));
+    }
     inline shared_ptr<http_service> &operator[](int i) {
         return _svcs.at(i);
     }
@@ -85,6 +93,27 @@ public:
 private:
     vector<shared_ptr<ip_endpoint>> _svcs;
     int _cur;
+};
+
+class plain_data_service : public http_service {
+public:
+    plain_data_service(const string &data);
+    plain_data_service(const string &data, const string &ctype);
+    void update_data(const string &data);
+    virtual void serve(shared_ptr<http_transaction> tx);
+private:
+    void update_etag();
+    string _data, _ctype, _etag;
+};
+
+class regex_route : public http_service {
+public:
+    explicit regex_route(const string &pat, shared_ptr<http_service> svc);
+    explicit regex_route(const regex &pat, shared_ptr<http_service> svc);
+    virtual void serve(shared_ptr<http_transaction> tx);
+private:
+    regex _pattern;
+    shared_ptr<http_service> _svc;
 };
 
 #endif

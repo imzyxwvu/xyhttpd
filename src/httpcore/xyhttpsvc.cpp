@@ -4,6 +4,8 @@
 #include <iostream>
 #include <sstream>
 
+http_service::~http_service() {}
+
 void http_service_chain::serve(shared_ptr<http_transaction> tx) {
     for(auto it = _svcs.cbegin(); it != _svcs.cend(); it++) {
         (*it)->serve(tx);
@@ -15,7 +17,9 @@ void http_service_chain::append(shared_ptr<http_service> svc) {
     _svcs.push_back(svc);
 }
 
-http_service_chain::~http_service_chain() {}
+void http_service_chain::route(const string &r, shared_ptr<http_service> svc) {
+    _svcs.push_back(make_shared<regex_route>(r, svc));
+}
 
 local_file_service::local_file_service(const string &docroot)
     : _docroot(nullptr) {
@@ -226,4 +230,55 @@ void proxy_pass_service::serve(shared_ptr<http_transaction> tx) {
         _cur = 0;
     shared_ptr<ip_endpoint> ep = _svcs[_cur++];
     tx->forward_to(ep);
+}
+
+plain_data_service::plain_data_service(const string &data)
+: _data(data), _ctype("text/plain") {
+    update_etag();
+}
+
+plain_data_service::plain_data_service(const string &data, const string &ctype)
+: _data(data), _ctype(ctype) {
+    update_etag();
+}
+
+void plain_data_service::update_etag() {
+    _etag = to_string(time(NULL));
+}
+
+void plain_data_service::update_data(const string &data) {
+    _data = data;
+    update_etag();
+}
+
+void plain_data_service::serve(shared_ptr<http_transaction> tx) {
+    if(tx->request->method() != GET && tx->request->method() != HEAD) {
+        tx->display_error(405);
+        return;
+    }
+    auto etag = tx->request->header("if-none-match");
+    if(etag && *etag == _etag) {
+        auto resp = tx->make_response(304);
+        tx->flush_response();
+        return;
+    }
+    auto resp = tx->make_response(200);
+    resp->set_header("Content-Type", _ctype);
+    resp->set_header("Content-Length", to_string(_data.size()));
+    resp->set_header("ETag", _etag);
+    tx->flush_response();
+    if(tx->request->method() != HEAD)
+        tx->write(_data);
+}
+
+regex_route::regex_route(const string &pat, shared_ptr<http_service> svc)
+: _pattern(pat), _svc(svc) {}
+
+regex_route::regex_route(const regex &pat, shared_ptr<http_service> svc)
+: _pattern(pat), _svc(svc) {}
+
+void regex_route::serve(shared_ptr<http_transaction> tx) {
+    smatch sm;
+    if(regex_match(*tx->request->path(), sm, _pattern))
+        _svc->serve(tx);
 }

@@ -148,6 +148,7 @@ private:
 class http_service {
 public:
     virtual void serve(shared_ptr<http_transaction> tx) = 0;
+    virtual ~http_service() = 0;
 };
 
 class http_connection {
