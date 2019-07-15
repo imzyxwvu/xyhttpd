@@ -26,7 +26,7 @@ void streambuffer::enlarge(int nbytes) {
     _size += nbytes;
 }
 
-void streambuffer::append(void *buffer, int nbytes) {
+void streambuffer::append(const void *buffer, int nbytes) {
     memcpy(prepare(nbytes), buffer, nbytes);
     enlarge(nbytes);
 }
@@ -39,6 +39,13 @@ void *streambuffer::prepare(int nbytes) {
     } else {
         return NULL;
     }
+}
+
+char *streambuffer::detach() {
+    char *_old = _data;
+    _data = nullptr;
+    _size = 0;
+    return _old;
 }
 
 streambuffer::~streambuffer() {

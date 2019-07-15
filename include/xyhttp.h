@@ -25,16 +25,17 @@ public:
     inline shared_ptr<string> path() const { return _path; }
     inline shared_ptr<string> query() const { return _query; }
     inline shared_ptr<string> header(const string &key) {
-        if(_headers.find(key) == _headers.end())
-            return shared_ptr<string>();
-        return _headers.at(key);
+        auto it = _headers.find(key);
+        return it == _headers.end() ? nullptr : it->second;
     }
+    bool header_include(const string &key, const string &kw);
     inline void set_header(const string &key, shared_ptr<string> val) {
         _headers[key] = val;
     }
     inline void set_header(const string &key, const string &val) {
         _headers[key] = make_shared<string>(val);
     }
+    void delete_header(const string &key);
     const char *method_name() const;
     virtual int type() const;
     virtual ~http_request();
@@ -72,16 +73,16 @@ private:
 class http_response : public message {
 public:
     inline shared_ptr<string> header(const string &key) {
-        if(_headers.find(key) == _headers.end())
-            return shared_ptr<string>();
-        return _headers.at(key);
+        auto it = _headers.find(key);
+        return it == _headers.end() ? nullptr : it->second;
     }
     inline int code() {
         return _code;
     }
-    virtual void set_code(int newcode);
-    virtual void set_header(const string &key, const string &val);
-    virtual void set_header(const string &key, shared_ptr<string> val);
+    void set_code(int newcode);
+    void set_header(const string &key, const string &val);
+    void set_header(const string &key, shared_ptr<string> val);
+    void delete_header(const string &key);
     static const char *state_description(int code);
 
     virtual int serialize_size();
@@ -111,6 +112,14 @@ private:
     http_response &operator=(const http_response &);
 };
 
+class http_transfer_decoder : public string_decoder {
+public:
+    http_transfer_decoder(shared_ptr<string> transferEnc);
+    virtual bool decode(shared_ptr<streambuffer> &stb);
+private:
+    bool _chunked;
+};
+
 class http_connection;
 
 class http_transaction {
@@ -124,24 +133,28 @@ public:
     void forward_to(shared_ptr<fcgi_connection> conn);
     void redirect_to(const string &dest);
     void display_error(int code);
+    void declare_length(int len);
     shared_ptr<class websocket> accept_websocket();
-    shared_ptr<http_response> make_response();
-    shared_ptr<http_response> make_response(int code);
-    const shared_ptr<http_response> get_response();
-    void flush_response();
+    shared_ptr<http_response> get_response();
+    shared_ptr<http_response> get_response(int code);
+    shared_ptr<stream> upgrade();
     void write(const char *buf, int len);
     void write(const string &buf);
+    void finish();
 
-    inline bool header_sent() const {
-        return _header_sent;
-    }
+    inline bool header_sent() const { return _headerSent; }
     const shared_ptr<http_request> request;
     const shared_ptr<http_connection> connection;
     static const string SERVER_VERSION;
     static const string WEBSOCKET_MAGIC;
     shared_ptr<string> postdata;
 private:
-    bool _header_sent;
+    void flush_response();
+    void write_chunk(const char *buf, int len);
+    bool _headerSent, _finished;
+    enum transfer_mode { UNDECIDED, SIMPLE, GZIP, CHUNKED, UPGRADE };
+    transfer_mode _transfer_mode;
+    streambuffer _tx_buffer;
     shared_ptr<http_response> _response;
 };
 

@@ -97,6 +97,10 @@ void http_response::set_header(const string &key, const string &val) {
     set_header(key, make_shared<string>(val));
 }
 
+void http_response::delete_header(const string &key) {
+    _headers.erase(key);
+}
+
 http_response::~http_response() {}
 
 http_response::decoder::decoder() {}
@@ -218,3 +222,33 @@ shared_ptr<message> http_response::decoder::msg() {
 }
 
 http_response::decoder::~decoder() {}
+
+http_transfer_decoder::http_transfer_decoder(shared_ptr<string> transferEnc) {
+    _chunked = transferEnc && transferEnc->find("chunked") != -1;
+}
+
+bool http_transfer_decoder::decode(shared_ptr<streambuffer> &stb) {
+    if(_chunked) {
+        if(stb->size() > 3) {
+            char *end;
+            int len = strtol(stb->data(), &end, 16);
+            int chunkSize = end - stb->data();
+            if(!(chunkSize > 0 && end[0] == '\r' && end[1] == '\n'))
+                throw runtime_error("bad chunked protocol");
+            chunkSize += len + 4;
+            if(stb->size() < chunkSize) return false;
+            if(buffer) free(buffer);
+            nbyte = len;
+            if(len == 0) {
+                buffer = nullptr;
+                return true;
+            }
+            buffer = (char *)malloc(len);
+            memcpy(buffer, end + 2, len);
+            stb->pull(chunkSize);
+            return true;
+        }
+    }
+    else
+        return string_decoder::decode(stb);
+}

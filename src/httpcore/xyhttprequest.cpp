@@ -193,6 +193,16 @@ shared_ptr<message> http_request::decoder::msg() {
     return _msg;
 }
 
+void http_request::delete_header(const string &key) {
+    _headers.erase(key);
+}
+
+bool http_request::header_include(const string &key, const string &kw) {
+    auto it = _headers.find(key);
+    if(it == _headers.end()) return false;
+    return it->second->find(kw) != -1;
+}
+
 map<string, shared_ptr<string>>::const_iterator http_request::hbegin() const {
     return _headers.cbegin();
 }

@@ -35,6 +35,8 @@ shared_ptr<stream> http_connection::upgrade() {
 
 void http_connection::invoke_service(shared_ptr<http_transaction> tx) {
     try {
+        if(!tx->request->header("host"))
+            tx->display_error(400);
         _svc->serve(tx);
         if(!tx->header_sent())
             tx->display_error(404);
@@ -46,24 +48,16 @@ void http_connection::invoke_service(shared_ptr<http_transaction> tx) {
             _keep_alive = false;
             return;
         }
-        auto resp = tx->make_response(500);
-        int pagelen = 240 + strlen(ex.filename()) + strlen(ex.what());
+        auto resp = tx->get_response(500);
         char **trace = ex.stacktrace();
-        for(int i = 0; i < ex.tracedepth(); i++)
-            pagelen += 10 + strlen(trace[i]);
-        char *page = new char[pagelen];
-        char *ptr = page;
-        ptr += sprintf(ptr, "<html><head><title>XWSG Internal Error</title></head>"
-            "<body><h1>500 Internal Server Error</h1><p><span>%s:%d:</span> %s</p>"
-            "<ul style=\"color:gray\">", ex.filename(), ex.lineno(), ex.what());
-        for(int i = 0; i < ex.tracedepth(); i++)
-            ptr += sprintf(ptr, "<li>%s</li>", trace[i]);
-        ptr += sprintf(ptr, "</ul><i style=\"font-size:.8em\">%s</i></body></html>",
-            http_transaction::SERVER_VERSION.c_str());
         resp->set_header("Content-Type", "text/html");
-        resp->set_header("Content-Length", to_string(ptr - page));
-        tx->write(page, ptr - page);
-        delete[] page;
+        tx->write(fmt("<html><head><title>XWSG Internal Error</title></head>"
+                      "<body><h1>500 Internal Server Error</h1><p><span>%s:%d:</span> %s</p>"
+                      "<ul style=\"color:gray\">", ex.filename(), ex.lineno(), ex.what()));
+        for(int i = 0; i < ex.tracedepth(); i++)
+            tx->write(fmt("<li>%s</li>", trace[i]));
+        tx->write(fmt("</ul><i style=\"font-size:.8em\">%s</i></body></html>",
+                      http_transaction::SERVER_VERSION.c_str()));
     }
     catch(exception &ex) {
         if(tx->header_sent()) {
@@ -71,17 +65,14 @@ void http_connection::invoke_service(shared_ptr<http_transaction> tx) {
             _keep_alive = false;
             return;
         }
-        auto resp = tx->make_response(500);
-        char *page = new char[128 + strlen(ex.what())];
-        int size = sprintf(page, "<html>"
-            "<head><title>XWSG Internal Error</title></head>"
-            "<body><h1>500 Internal Server Error</h1>"
-            "<p>%s</p></body></html>", ex.what());
+        auto resp = tx->get_response(500);
         resp->set_header("Content-Type", "text/html");
-        resp->set_header("Content-Length", to_string(size));
-        tx->write(page, size);
-        delete[] page;
+        tx->write(fmt("<html>"
+                      "<head><title>XWSG Internal Error</title></head>"
+                      "<body><h1>500 Internal Server Error</h1>"
+                      "<p>%s</p></body></html>", ex.what()));
     }
+    tx->finish();
 }
 
 bool http_connection::has_tls() {

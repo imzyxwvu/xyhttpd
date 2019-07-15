@@ -257,22 +257,21 @@ shared_ptr<message> string_decoder::msg() {
     if(buffer)
         return shared_ptr<string_message>(
             new string_message(buffer, nbyte));
+    return nullptr;
 }
 
 bool string_decoder::decode(shared_ptr<streambuffer> &stb) {
     if(stb->size() > 0) {
-        if(buffer) delete buffer;
+        if(buffer) free(buffer);
         nbyte = stb->size();
-        buffer = new char[nbyte];
-        memcpy(buffer, stb->data(), nbyte);
-        stb->pull(nbyte);
+        buffer = stb->detach();
         return true;
     }
     return false;
 }
 
 string_decoder::~string_decoder() {
-    if(buffer) delete buffer;
+    if(buffer) free(buffer);
 }
 
 rest_decoder::rest_decoder(int rest) :
@@ -280,32 +279,28 @@ rest_decoder::rest_decoder(int rest) :
 
 shared_ptr<message> rest_decoder::msg() {
     if(buffer) {
-        shared_ptr<string_message> msg(
-            new string_message(buffer, nbyte));
-        delete buffer;
-        buffer = nullptr;
-        nbyte = 0;
-        return msg;
+        return make_shared<string_message>(buffer, nbyte);
     }
 }
 
 bool rest_decoder::decode(shared_ptr<streambuffer> &stb) {
-    if(buffer) 
-        throw runtime_error("take message first");
     if(nrest == 0)
         throw runtime_error("no more data to read");
+    if(buffer) free(buffer);
     if(stb->size() <= nrest) {
         nbyte = stb->size();
+        buffer = stb->detach();
+        nrest -= nbyte;
     } else {
         nbyte = nrest;
+        buffer = (char *)malloc(nbyte);
+        memcpy(buffer, stb->data(), nbyte);
+        stb->pull(nbyte);
+        nrest -= nbyte;
     }
-    buffer = new char[nbyte];
-    memcpy(buffer, stb->data(), nbyte);
-    stb->pull(nbyte);
-    nrest -= nbyte;
     return true;
 }
 
 rest_decoder::~rest_decoder() {
-    if(buffer) delete buffer;
+    if(buffer) free(buffer);
 }

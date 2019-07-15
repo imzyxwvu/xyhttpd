@@ -34,7 +34,8 @@ public:
     virtual void accept(uv_stream_t *);
     template<class T>
     inline shared_ptr<T> read(shared_ptr<decoder> dec) {
-        return dynamic_pointer_cast<T>(read(dec));
+        auto msg = read(dec);
+        return msg ? dynamic_pointer_cast<T>(msg) : nullptr;
     }
     virtual shared_ptr<message> read(shared_ptr<decoder>);
     virtual void write(const char *buf, int length);
@@ -105,7 +106,7 @@ public:
     virtual bool decode(shared_ptr<streambuffer> &stb);
     virtual shared_ptr<message> msg();
     virtual ~string_decoder();
-private:
+protected:
     int nbyte;
     char *buffer;
 };

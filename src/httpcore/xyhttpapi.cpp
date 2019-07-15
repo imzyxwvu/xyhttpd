@@ -5,14 +5,17 @@
 #include "xyhttp.h"
 #include "xywebsocket.h"
 
+#include <zlib.h>
 #include <openssl/sha.h> // used by http_transaction::accept_websocket
+#include <cassert>
 
 const string http_transaction::SERVER_VERSION("xyhttpd/19.07 (xwsg.0xspot.com)");
 const string http_transaction::WEBSOCKET_MAGIC("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
 
 http_transaction::http_transaction(
     shared_ptr<http_connection> conn, shared_ptr<http_request> req) :
-    connection(conn), request(req), _header_sent(false) {
+    connection(conn), request(req), _headerSent(false),
+    _finished(false), _transfer_mode(UNDECIDED) {
     if(auto ctlen = request->header("content-length")) {
         int len = atoi(ctlen->c_str());
         if(len > 0x800000) {
@@ -30,6 +33,7 @@ http_transaction::http_transaction(
         postdata = shared_ptr<string>(new string(buf, len));
         delete buf;
     }
+    _response = make_shared<http_response>(200);
 }
 
 void http_transaction::forward_to(const string &host, int port) {
@@ -38,37 +42,38 @@ void http_transaction::forward_to(const string &host, int port) {
 }
 
 void http_transaction::forward_to(shared_ptr<ip_endpoint> ep) {
-    if(_header_sent)
-        throw RTERR("header already sent");
+    if(header_sent()) throw RTERR("header already sent");
     shared_ptr<tcp_stream> strm(new tcp_stream);
     strm->connect(ep);
     shared_ptr<http_request> newreq(new http_request(*request));
     newreq->set_header("X-Forwarded-For", connection->_peername);
+    newreq->delete_header("accept-encoding");
     strm->write(newreq);
     if(postdata) strm->write(*postdata);
+    _response->set_code(100);
     shared_ptr<http_response::decoder> respdec(new http_response::decoder());
-    while(!_response || _response->code() == 100)
+    while(_response->code() == 100)
         _response = strm->read<http_response>(respdec);
-    if(auto len = _response->header("Content-Length")) {
-        auto dec = shared_ptr<rest_decoder>(
-                new rest_decoder(atoi(len->c_str())));
+    if(auto contentLen = _response->header("Content-Length")) {
+        int len = atoi(contentLen->c_str());
+        declare_length(len);
+        auto dec = shared_ptr<rest_decoder>(new rest_decoder(len));
         while(dec->more()) {
             auto msg = strm->read<string_message>(dec);
             write(msg->data(), msg->serialize_size());
         }
     }
-    else if (_response->code() == 304)
-        flush_response();
-    else {
-        connection->_keep_alive = false;
-        _response->set_header("Connection", "close");
-        auto dec = shared_ptr<string_decoder>(new string_decoder());
+    else if (_response->code() != 304) {
+        auto dec = make_shared<http_transfer_decoder>(
+                _response->header("Transfer-Encoding"));
+        _response->delete_header("Transfer-Encoding");
         while(true) {
             auto msg = strm->read<string_message>(dec);
             if(!msg) break;
             write(msg->data(), msg->serialize_size());
         }
     }
+    finish();
 }
 
 void http_transaction::forward_to(shared_ptr<fcgi_connection> conn) {
@@ -93,15 +98,13 @@ void http_transaction::forward_to(shared_ptr<fcgi_connection> conn) {
     }
     if(postdata) conn->write(postdata);
     _response = conn->read<http_response>(make_shared<http_response::decoder>());
-    connection->_keep_alive = false;
-    _response->set_header("Connection", "close");
-    flush_response();
     auto dec = shared_ptr<string_decoder>(new string_decoder());
     while(true) {
         auto msg = conn->read<string_message>(dec);
         if(!msg) break;
         write(msg->data(), msg->serialize_size());
     }
+    finish();
 }
 
 void http_transaction::serve_file(const string &filename) {
@@ -126,15 +129,15 @@ void http_transaction::serve_file(const string &filename) {
     string modtime(ftbuf, tlen);
     shared_ptr<string> chktime = request->header("if-modified-since");
     if(chktime && modtime == *chktime) {
-        auto resp = make_response(304);
-        flush_response();
+        auto resp = get_response(304);
+        finish();
         return;
     }
-    auto resp = make_response(200);
+    auto resp = get_response(200);
     resp->set_header("Last-Modified", modtime);
-    resp->set_header("Content-Length", to_string(info.st_size));
+    declare_length(info.st_size);
     if(request->method() == HEAD) {
-        flush_response();
+        finish();
         return;
     }
     int fd = open(filename.c_str(), O_RDONLY);
@@ -156,6 +159,14 @@ void http_transaction::serve_file(const string &filename) {
     }
     delete[] buf;
     close(fd);
+    finish();
+}
+
+shared_ptr<stream> http_transaction::upgrade() {
+    _transfer_mode = UPGRADE;
+    flush_response();
+    _finished = true;
+    return connection->upgrade();
 }
 
 shared_ptr<websocket> http_transaction::accept_websocket() {
@@ -170,72 +181,148 @@ shared_ptr<websocket> http_transaction::accept_websocket() {
     string wsaccept = *wskey + WEBSOCKET_MAGIC;
     unsigned char shabuf[SHA_DIGEST_LENGTH];
     SHA1((unsigned char *)wsaccept.data(), wsaccept.size(), shabuf);
-    auto resp = make_response(101);
+    auto resp = get_response(101);
     resp->set_header("Upgrade", "websocket");
     resp->set_header("Sec-WebSocket-Accept",
             base64_encode(shabuf, SHA_DIGEST_LENGTH));
-    shared_ptr<websocket> ws(new websocket(connection->upgrade()));
-    flush_response();
-    return ws;
+    return make_shared<websocket>(upgrade());
 }
 
 void http_transaction::redirect_to(const string &dest) {
-    auto resp = make_response(302);
+    auto resp = get_response(302);
     resp->set_header("Location", dest);
-    resp->set_header("Content-Length", "0");
     flush_response();
 }
 
 void http_transaction::display_error(int code) {
-    auto resp = make_response(code);
-    char page[256];
-    int size = sprintf(page, "<html><head><title>XWSG Error %d</title></head>"
-        "<body><h1>%d %s</h1></body></html>", code, code,
-        http_response::state_description(code));
+    auto resp = get_response(code);
     resp->set_header("Content-Type", "text/html");
-    resp->set_header("Content-Length", to_string(size));
-    write(page, size);
+    write(fmt("<html><head><title>XWSG Error %d</title></head>"
+              "<body><h1>%d %s</h1></body></html>", code, code,
+              http_response::state_description(code)));
+    finish();
 }
 
-shared_ptr<http_response> http_transaction::make_response() {
-    if(_header_sent)
-        throw runtime_error("header already sent");
-    if(!_response) {
-        _response = shared_ptr<http_response>(new http_response(200));
-    }
+shared_ptr<http_response> http_transaction::get_response() {
     return _response;
 }
 
-shared_ptr<http_response> http_transaction::make_response(int code) {
-    if(_header_sent)
+shared_ptr<http_response> http_transaction::get_response(int code) {
+    if(header_sent())
         throw runtime_error("header already sent");
-    if(_response) {
-        _response->set_code(code);
-    } else {
-        _response = shared_ptr<http_response>(new http_response(code));
-    }
+    _response->set_code(code);
     return _response;
 }
 
 void http_transaction::flush_response() {
-    if(_header_sent) return;
-    if(!_response) make_response();
+    assert(!_headerSent);
     _response->set_header("Server", SERVER_VERSION);
-    if(connection->_upgraded) {
+    if(_transfer_mode == UPGRADE) {
         _response->set_header("Connection", "upgrade");
+    } else if(_transfer_mode == CHUNKED) {
+        _response->set_header("Transfer-Encoding", "chunked");
     } else {
         _response->set_header("Connection",
                               connection->keep_alive() ? "keep-alive" : "close");
     }
     connection->_strm->write(_response);
-    _header_sent = true;
+    _headerSent = true;
+}
+
+void http_transaction::declare_length(int len) {
+    if(_transfer_mode == UNDECIDED && len < 0x80000 &&
+            len > 0x200 && request->method() != HEAD) {
+        if(request->header_include("accept-encoding", "deflate")) {
+            _response->set_header("Content-Encoding", "deflate");
+            _transfer_mode = GZIP;
+        }
+    }
+    if(_transfer_mode == UNDECIDED) {
+        _transfer_mode = SIMPLE;
+        _response->set_header("Content-Length", to_string(len));
+    }
 }
 
 void http_transaction::write(const char *buf, int len) {
-    flush_response();
+    if(_finished)
+        throw RTERR("HTTP transaction already finished");
+    if(len == 0) return;
+    switch(_transfer_mode) {
+        case UNDECIDED:
+            _tx_buffer.append(buf, len);
+            if(_tx_buffer.size() > 0x80000) {
+                _transfer_mode = CHUNKED;
+                flush_response();
+                write_chunk(_tx_buffer.data(), _tx_buffer.size());
+                _tx_buffer.pull(_tx_buffer.size());
+            }
+            break;
+        case GZIP:
+            _tx_buffer.append(buf, len);
+            break;
+        case SIMPLE:
+            if(!_headerSent) flush_response();
+            connection->_strm->write(buf, len);
+            break;
+        case CHUNKED:
+            write_chunk(buf, len);
+            break;
+    }
+}
+
+void http_transaction::write_chunk(const char *buf, int len) {
+    char chunkHdr[16];
+    int hdrLen = sprintf(chunkHdr, "%x\r\n", len);
+    connection->_strm->write(chunkHdr, hdrLen);
     connection->_strm->write(buf, len);
+    connection->_strm->write("\r\n", 2);
+
 }
 
 void http_transaction::write(const string &buf) {
     write(buf.data(), buf.size());
+}
+
+void http_transaction::finish() {
+    if(_transfer_mode == SIMPLE || _response->code() == 304)
+        _finished = true;
+    if(_finished) {
+        if(!_headerSent) flush_response();
+        return;
+    }
+    if(_transfer_mode == UNDECIDED) declare_length(_tx_buffer.size());
+    switch(_transfer_mode) {
+        case GZIP: {
+            unsigned long bound = compressBound(_tx_buffer.size());
+            char *buf = new char[bound];
+            if(compress((Bytef *)buf, &bound,
+                    (Bytef *)_tx_buffer.data(), _tx_buffer.size()) == Z_OK
+                    && bound < _tx_buffer.size()) {
+                _tx_buffer.pull(_tx_buffer.size());
+                _response->set_header("Content-Length", to_string(bound));
+                flush_response();
+                connection->_strm->write(buf, bound);
+                delete[] buf;
+            } else {
+                delete[] buf;
+                _response->set_header("Content-Length", to_string(_tx_buffer.size()));
+                _response->delete_header("Content-Encoding");
+                flush_response();
+                connection->_strm->write(_tx_buffer.data(), _tx_buffer.size());
+                _tx_buffer.pull(_tx_buffer.size());
+            }
+            break;
+        }
+        case CHUNKED:
+            connection->_strm->write("0\r\n\r\n", 5);
+            break;
+        case SIMPLE:
+            flush_response();
+            if(_tx_buffer.size() > 0) {
+                connection->_strm->write(_tx_buffer.data(), _tx_buffer.size());
+                _tx_buffer.pull(_tx_buffer.size());
+            }
+            break;
+    }
+    _finished = true;
 }

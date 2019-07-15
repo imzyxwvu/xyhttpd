@@ -25,10 +25,11 @@ public:
 class streambuffer {
 public:
     streambuffer();
-    virtual void pull(int nbytes);
-    virtual void *prepare(int nbytes);
-    virtual void enlarge(int nbytes);
-    virtual void append(void *buffer, int nbytes);
+    void pull(int nbytes);
+    void *prepare(int nbytes);
+    void enlarge(int nbytes);
+    void append(const void *buffer, int nbytes);
+    char *detach();
     inline int size() const { return _size; }
     inline char *data() const { return (char *)_data; };
     virtual ~streambuffer();

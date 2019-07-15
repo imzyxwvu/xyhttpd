@@ -81,6 +81,7 @@ private:
 class proxy_pass_service : public http_service {
 public:
     proxy_pass_service();
+    proxy_pass_service(const string &host, int port);
     virtual void serve(shared_ptr<http_transaction> tx);
     virtual void append(shared_ptr<ip_endpoint> ep);
     virtual void append(const string &host, int port);

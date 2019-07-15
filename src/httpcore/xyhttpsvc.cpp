@@ -123,7 +123,7 @@ void local_file_service::serve(shared_ptr<http_transaction> tx) {
             tx->forward_to(conn);
             return;
         } else {
-            shared_ptr<http_response> resp = tx->make_response();
+            shared_ptr<http_response> resp = tx->get_response();
             resp->set_header("Content-Type", _mimetypes[ext]);
         }
     }
@@ -149,17 +149,15 @@ void tls_filter_service::serve(shared_ptr<http_transaction> tx) {
                     tx->request->header("host")->c_str(),
                     tx->request->resource()->c_str()));
         } else {
-            auto str = fmt("<!DOCTYPE html><html><head>"
-                           "<title>XWSG TLS Error %d</title></head>"
-                           "<body><h1>%d %s</h1><p>"
-                           "An HTTP request was sent to an HTTPS port."
-                           "</p></body></html>",
-                           _code, _code, http_response::state_description(_code));
-            auto resp = tx->make_response(_code);
+            auto resp = tx->get_response(_code);
             resp->set_header("Content-Type", "text/html");
-            resp->set_header("Content-Length", to_string(str.size()));
-            tx->flush_response();
-            tx->write(str.data(), str.size());
+            tx->write(fmt("<!DOCTYPE html><html><head>"
+                          "<title>XWSG TLS Error %d</title></head>"
+                          "<body><h1>%d %s</h1><p>"
+                          "An HTTP request was sent to an HTTPS port."
+                          "</p></body></html>",
+                          _code, _code, http_response::state_description(_code)));
+            tx->finish();
         }
     }
 }
@@ -215,6 +213,10 @@ void host_dispatch_service::serve(shared_ptr<http_transaction> tx) {
 
 proxy_pass_service::proxy_pass_service() : _cur(0) {}
 
+proxy_pass_service::proxy_pass_service(const string &host, int port) : _cur(0) {
+    append(host, port);
+}
+
 void proxy_pass_service::append(shared_ptr<ip_endpoint> ep) {
     _svcs.push_back(ep);
 }
@@ -258,17 +260,17 @@ void plain_data_service::serve(shared_ptr<http_transaction> tx) {
     }
     auto etag = tx->request->header("if-none-match");
     if(etag && *etag == _etag) {
-        auto resp = tx->make_response(304);
-        tx->flush_response();
+        tx->get_response(304);
+        tx->finish();
         return;
     }
-    auto resp = tx->make_response(200);
+    auto resp = tx->get_response(200);
     resp->set_header("Content-Type", _ctype);
-    resp->set_header("Content-Length", to_string(_data.size()));
     resp->set_header("ETag", _etag);
-    tx->flush_response();
+    tx->declare_length(_data.length());
     if(tx->request->method() != HEAD)
         tx->write(_data);
+    tx->finish();
 }
 
 regex_route::regex_route(const string &pat, shared_ptr<http_service> svc)
