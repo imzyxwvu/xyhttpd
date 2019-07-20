@@ -2,6 +2,7 @@
 #define XYHTTPD_STREAM_H
 
 #include <uv.h>
+#include <queue>
 
 #include "xycommon.h"
 #include "xyfiber.h"
@@ -26,12 +27,35 @@ private:
     int _status;
 };
 
+class write_request {
+public:
+    write_request(char *data, size_t len);
+    write_request(const string &data);
+    write_request(shared_ptr<message> data);
+    write_request(const write_request &) = delete;
+    ~write_request();
+
+    inline const char *base() {
+        return _data + _cur;
+    }
+
+    inline size_t size() {
+        return _len - _cur;
+    }
+
+    void associate(shared_ptr<fiber> _bound_fiber);
+    void abort(int eno);
+    bool confirm(int len);
+private:
+    char *_data;
+    size_t _len, _cur;
+    shared_ptr<fiber> _bound_fiber;
+};
+
 class stream {
 public:
     shared_ptr<streambuffer> buffer;
-    shared_ptr<fiber> reading_fiber, writing_fiber;
 
-    virtual void accept(uv_stream_t *);
     template<class T>
     inline shared_ptr<T> read(shared_ptr<decoder> dec) {
         auto msg = read(dec);
@@ -42,13 +66,23 @@ public:
     virtual bool has_tls();
     void write(shared_ptr<message> msg);
     void write(const string &str);
+    void dispatch_event(int events);
     virtual ~stream();
 protected:
-    uv_stream_t *handle;
-    stream();
-private:
-    uv_write_t _wreq;
-    stream(const stream &);
+    queue<shared_ptr<write_request>> _write_queue;
+    shared_ptr<fiber> _reading_fiber;
+    bool _connecting;
+    uv_poll_t _poller;
+    int _fd;
+    bool _readable, _eof;
+    shared_ptr<decoder> _reading_decoder;
+    stream(int fd);
+    stream(const stream &) = delete;
+    void connect(const sockaddr *addr, int len);
+    int fill_read_buffer(shared_ptr<decoder> tryDecoder);
+    void do_write_request(shared_ptr<write_request> req);
+    void flush_write_queue();
+    const int READ_STEP = 0x1000;
 };
 
 class ip_endpoint {
@@ -59,6 +93,7 @@ public:
     int port();
     shared_ptr<string> straddr();
     const sockaddr *sa();
+    const size_t size();
 private:
     union {
         struct sockaddr_storage _sa;
@@ -73,8 +108,10 @@ public:
     virtual void connect(const string &host, int port);
     virtual void connect(shared_ptr<ip_endpoint> ep);
     shared_ptr<ip_endpoint> getpeername();
-private:
-    virtual void connect(const sockaddr *sa);
+    static shared_ptr<tcp_stream> accept(int fd);
+protected:
+    tcp_stream(int fd, shared_ptr<ip_endpoint> ep);
+    shared_ptr<ip_endpoint> _remote_ep;
 };
 
 class unix_stream : public stream {

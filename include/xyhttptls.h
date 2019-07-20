@@ -12,7 +12,7 @@ public:
 
     tls_context ctx();
     virtual void use_certificate(const char *file, const char *key);
-    virtual void do_listen(int backlog);
+    virtual void handle_incoming();
 private:
     tls_context _ctx;
 };

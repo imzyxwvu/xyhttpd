@@ -19,8 +19,8 @@ static const char *sslerror_to_string(int err_code)
     }
 }
 
-tls_stream::tls_stream(const tls_context &ctx) :
-        _handshake_ok(false), _fallen_back(false), _chelo_recv(false) {
+tls_stream::tls_stream(int fd, const tls_context &ctx) : tcp_stream(fd, nullptr),
+                                                         _handshake_ok(false), _fallen_back(false), _chelo_recv(false) {
     _ssl = SSL_new(ctx.ctx());
     if(!_ssl)
         throw RTERR("Failed to create SSL instance");
@@ -37,9 +37,16 @@ tls_stream::tls_stream(const tls_context &ctx) :
     SSL_set_bio(_ssl, _rxbio, _txbio);
 }
 
-void tls_stream::accept(uv_stream_t *svr) {
-    tcp_stream::accept(svr);
-    SSL_set_accept_state(_ssl);
+shared_ptr<tls_stream> tls_stream::accept(int fd, const tls_context &ctx) {
+    sockaddr_storage sa;
+    socklen_t len = sizeof(sa);
+    int newFd = ::accept(fd, (sockaddr *)&sa, &len);
+    if(newFd < 0)
+        throw IOERR(errno);
+    shared_ptr<tls_stream> client(new tls_stream(newFd, ctx));
+    SSL_set_accept_state(client->_ssl);
+    client->_remote_ep = make_shared<ip_endpoint>(&sa);
+    return client;
 }
 
 void tls_stream::do_handshake() {
@@ -74,7 +81,7 @@ void tls_stream::_put_incoming(const char *buf, int length) {
 }
 
 shared_ptr<message> tls_stream::read(shared_ptr<decoder> decoder) {
-    if(reading_fiber)
+    if(_reading_fiber)
         throw RTERR("reading from a stream occupied by another fiber");
     do_handshake();
     if(_fallen_back)
@@ -125,21 +132,6 @@ void tls_stream::write(const char *buf, int length) {
 }
 
 
-static void tls_stream_on_alloc(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    tls_stream *self = (tls_stream *)handle->data;
-    buf->base = (char *)malloc(suggested_size);
-    buf->len = buf->base ? suggested_size : 0;
-}
-
-static void tls_stream_on_data(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
-    tls_stream *self = (tls_stream *)handle->data;
-    if(nread > 0)
-        self->_put_incoming(buf->base, nread);
-    delete buf->base;
-    self->reading_fiber->event = int_status::make(nread);
-    self->reading_fiber->resume();
-}
-
 bool tls_stream::handle_want(int r) {
     int pendingBytes = BIO_ctrl_pending(_txbio);
     if(pendingBytes > 0) {
@@ -153,17 +145,6 @@ bool tls_stream::handle_want(int r) {
     else if(r == SSL_ERROR_WANT_READ) {
         if(!fiber::in_fiber())
             throw logic_error("reading from a stream outside a fiber");
-        if((r = uv_read_start(handle, tls_stream_on_alloc, tls_stream_on_data)) < 0)
-            throw IOERR(r);
-        reading_fiber = fiber::current();
-        auto s = fiber::yield<int_status>();
-        uv_read_stop(handle);
-        reading_fiber.reset();
-        if(s->status() < 0) {
-            _eof_status = s->status();
-            if(_eof_status != UV_EOF)
-                throw IOERR(s->status());
-        }
         return true;
     }
     return false;
@@ -246,25 +227,14 @@ void https_server::use_certificate(const char *file, const char *key) {
     _ctx.use_certificate(file, key);
 }
 
-static void https_server_on_connection(uv_stream_t* strm, int status) {
-    https_server *self = (https_server *)strm->data;
-    if(status >= 0) {
-        tls_stream *client = new tls_stream(self->ctx());
-        try {
-            client->accept(strm);
-        }
-        catch(exception &ex) {
-            delete client;
-            cerr<<ex.what()<<endl;
-            return;
-        }
-        self->start_thread(shared_ptr<stream>(client),
-                           client->getpeername()->straddr());
+void https_server::handle_incoming() {
+    try {
+        auto client = tls_stream::accept(_fd, _ctx);
+        start_thread(shared_ptr<stream>(client),
+                     client->getpeername()->straddr());
     }
-}
-
-void https_server::do_listen(int backlog) {
-    int r = uv_listen((uv_stream_t *)_server, backlog, https_server_on_connection);
-    if(r < 0)
-        throw runtime_error(uv_strerror(r));
+    catch(exception &ex) {
+        cerr<<ex.what()<<endl;
+        return;
+    }
 }

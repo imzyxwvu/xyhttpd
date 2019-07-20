@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cstring>
+#include <unistd.h>
 
 #include "xyhttp.h"
 
@@ -80,12 +81,12 @@ bool http_connection::has_tls() {
 }
 
 http_server::http_server(shared_ptr<http_service> svc) : service(svc) {
-    _server = (uv_tcp_t *)malloc(sizeof(uv_tcp_t));
-    if(uv_tcp_init(uv_default_loop(), _server) < 0) {
-        free(_server);
-        throw runtime_error("failed to initialize libuv TCP stream");
-    }
-    _server->data = this;
+    _fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(_fd < 0)
+        throw IOERR(errno);
+    if(uv_poll_init(uv_default_loop(), &_poller, _fd) < 0)
+        throw RTERR("failed to create poller");
+    _poller.data = this;
 }
 
 http_server::http_server(http_service *svc)
@@ -109,20 +110,20 @@ static void http_service_loop(void *data) {
     }
 }
 
-static void http_server_on_connection(uv_stream_t* strm, int status) {
-    http_server *self = (http_server *)strm->data;
-    if(status >= 0) {
-        tcp_stream *client = new tcp_stream();
-        try {
-            client->accept(strm);
-        }
-        catch(exception &ex) {
-            delete client;
-            cout<<ex.what()<<endl;
-            return;
-        }
-        self->start_thread(shared_ptr<stream>(client),
-                           client->getpeername()->straddr());
+static void server_event_handler(uv_poll_t* handle, int status, int events) {
+    http_server *self = (http_server *)handle->data;
+    self->handle_incoming();
+}
+
+void http_server::handle_incoming() {
+    try {
+        auto client = tcp_stream::accept(_fd);
+        start_thread(shared_ptr<stream>(client),
+                     client->getpeername()->straddr());
+    }
+    catch(exception &ex) {
+        cout<<ex.what()<<endl;
+        return;
     }
 }
 
@@ -133,24 +134,15 @@ void http_server::start_thread(shared_ptr<stream> strm, shared_ptr<string> pname
 }
 
 void http_server::listen(const char *addr, int port) {
-    sockaddr_storage saddr;
-    if(uv_ip4_addr(addr, port, (struct sockaddr_in*)&saddr) &&
-       uv_ip6_addr(addr, port, (struct sockaddr_in6*)&saddr))
-        throw invalid_argument("invalid IP address or port");
-    int r = uv_tcp_bind(_server, (struct sockaddr *)&saddr, 0);
-    if(r < 0)
-        throw runtime_error(uv_strerror(r));
-    do_listen(64);
-}
-
-void http_server::do_listen(int backlog) {
-    int r = uv_listen((uv_stream_t *)_server, backlog, http_server_on_connection);
-    if(r < 0)
-        throw runtime_error(uv_strerror(r));
+    ip_endpoint ep(addr, port);
+    if(bind(_fd, ep.sa(), ep.size()) < 0)
+        throw IOERR(errno);
+    if(::listen(_fd, 64) < 0)
+        throw IOERR(errno);
+    uv_poll_start(&_poller, UV_READABLE, server_event_handler);
 }
 
 http_server::~http_server() {
-    if(_server) {
-        uv_close((uv_handle_t *)_server, (uv_close_cb) free);
-    }
+    uv_close((uv_handle_t *)&_poller, nullptr);
+    close(_fd);
 }

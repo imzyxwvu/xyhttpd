@@ -24,13 +24,14 @@ private:
 class tls_stream : public tcp_stream {
 public:
     explicit tls_stream(const tls_context &ctx);
+    tls_stream(int fd, const tls_context &ctx);
     virtual ~tls_stream();
 
     void _put_incoming(const char *buf, int length);
     virtual void connect(const string &host, int port);
     virtual shared_ptr<message> read(shared_ptr<decoder>);
     virtual void write(const char *buf, int length);
-    virtual void accept(uv_stream_t *);
+    static shared_ptr<tls_stream> accept(int fd, const tls_context &ctx);
     virtual bool has_tls();
 private:
     SSL *_ssl;
@@ -39,6 +40,7 @@ private:
     bool _handshake_ok, _fallen_back, _chelo_recv;
 
     tls_stream();
+    tls_stream(int fd, shared_ptr<ip_endpoint> ep);
     void do_handshake();
     bool handle_want(int r);
 };

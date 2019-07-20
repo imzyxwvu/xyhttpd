@@ -196,9 +196,10 @@ public:
     virtual void start_thread(shared_ptr<stream> strm, shared_ptr<string> pname);
 
     void listen(const char *addr, int port);
-    virtual void do_listen(int backlog);
+    virtual void handle_incoming();
 protected:
-    uv_tcp_t *_server;
+    int _fd;
+    uv_poll_t _poller;
 
     http_server(const http_server &);
     http_server &operator=(const http_server &);
