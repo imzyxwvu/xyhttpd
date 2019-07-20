@@ -20,7 +20,7 @@ static const char *sslerror_to_string(int err_code)
 }
 
 tls_stream::tls_stream(const tls_context &ctx) :
-_handshake_ok(false), _fallen_back(false), _chelo_recv(false) {
+        _handshake_ok(false), _fallen_back(false), _chelo_recv(false) {
     _ssl = SSL_new(ctx.ctx());
     if(!_ssl)
         throw RTERR("Failed to create SSL instance");
@@ -202,7 +202,7 @@ tls_context::tls_context(SSL_CTX *ctx) : _ctx(ctx) {
 void tls_context::use_certificate(const char *file) {
     if(!SSL_CTX_use_certificate_chain_file(_ctx, file))
         throw RTERR("Failed to use certificate file: %s",
-                ERR_reason_error_string(ERR_get_error()));
+                    ERR_reason_error_string(ERR_get_error()));
 }
 
 void tls_context::use_certificate(const char *file, const char *key) {
@@ -232,7 +232,7 @@ tls_context::~tls_context() {
 }
 
 https_server::https_server(tls_context ctx, shared_ptr<http_service> svc)
-: http_server(svc), _ctx(ctx) {}
+        : http_server(svc), _ctx(ctx) {}
 
 https_server::https_server(shared_ptr<http_service> svc) : http_server(svc) {}
 

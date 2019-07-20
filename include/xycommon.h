@@ -26,7 +26,7 @@ class streambuffer {
 public:
     streambuffer();
     void pull(int nbytes);
-    void *prepare(int nbytes);
+    char *prepare(int nbytes);
     void enlarge(int nbytes);
     void append(const void *buffer, int nbytes);
     char *detach();

@@ -19,7 +19,9 @@ public:
         return dynamic_pointer_cast<T>(yield());
     }
     static shared_ptr<wakeup_event> yield();
+    static void finalize();
     void resume();
+    void raise(const string &ex);
     inline void resume(shared_ptr<wakeup_event> evt) {
         event = evt;
         resume();
@@ -40,7 +42,8 @@ private:
     bool _terminated;
     void (*entry)(void *data);
     shared_ptr<fiber> self;
-    static shared_ptr<fiber> breathe;
+    shared_ptr<runtime_error> _err;
+    static shared_ptr<fiber> _last_breathe;
     static std::stack<shared_ptr<fiber>> levels;
     static ucontext_t maincontext;
 };
