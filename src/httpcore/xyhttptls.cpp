@@ -136,8 +136,7 @@ static void tls_stream_on_data(uv_stream_t* handle, ssize_t nread, const uv_buf_
     if(nread > 0)
         self->_put_incoming(buf->base, nread);
     delete buf->base;
-    self->reading_fiber->event = int_status::make(nread);
-    self->reading_fiber->resume();
+    self->reading_fiber->resume(int_status::make(nread));
 }
 
 bool tls_stream::handle_want(int r) {
@@ -159,11 +158,8 @@ bool tls_stream::handle_want(int r) {
         auto s = fiber::yield<int_status>();
         uv_read_stop(handle);
         reading_fiber.reset();
-        if(s->status() < 0) {
-            _eof_status = s->status();
-            if(_eof_status != UV_EOF)
-                throw IOERR(s->status());
-        }
+        if(s->status() < 0)
+            throw IOERR(s->status());
         return true;
     }
     return false;

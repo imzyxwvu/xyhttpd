@@ -1,4 +1,6 @@
 #include <iostream>
+#include <sys/mman.h>
+#include <unistd.h>
 #include "xyfiber.h"
 
 ucontext_t fiber::maincontext;
@@ -7,17 +9,30 @@ shared_ptr<fiber> fiber::_last_breathe;
 
 wakeup_event::~wakeup_event() {}
 
-fiber::fiber(void (*func)(void *)) : entry(func) {
-    getcontext(&context);
-    context.uc_stack.ss_sp = stack;
-    context.uc_stack.ss_size = sizeof(stack);
-    context.uc_link = NULL;
-}
-
 static void fiber_wrapper(fiber *f, void *data)
 {
     f->invoke(data);
     fiber::finalize();
+}
+
+fiber::fiber(size_t stacksiz, void (*func)(void *), void *data)
+: _stack_size(stacksiz), entry(func) {
+    _stack = (char *)mmap(NULL, stacksiz, PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANON, -1, 0);
+    if(!_stack)
+        throw RTERR("cannot allocate stack space for fiber");
+    *((ucontext_t **)_stack) = &context;
+    mprotect(_stack, getpagesize(), PROT_READ);
+    getcontext(&context);
+    context.uc_stack.ss_sp = _stack;
+    context.uc_stack.ss_size = _stack_size;
+    context.uc_link = NULL;
+    makecontext(&context, (void(*)(void))fiber_wrapper, 2, this, data);
+    _terminated = false;
+}
+
+fiber::~fiber() {
+    munmap(_stack, _stack_size);
 }
 
 void fiber::finalize() {
@@ -28,10 +43,8 @@ void fiber::finalize() {
 }
 
 shared_ptr<fiber> fiber::make(void (*entry)(void *), void *data) {
-    shared_ptr<fiber> f(new fiber(entry));
+    shared_ptr<fiber> f(new fiber(0x100000, entry, data));
     f->self = f;
-    makecontext(&f->context, (void(*)(void))fiber_wrapper, 2, f.get(), data);
-    f->_terminated = false;
     return f;
 }
 

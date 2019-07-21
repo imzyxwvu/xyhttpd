@@ -34,11 +34,13 @@ public:
     inline static bool in_fiber() {
         return !levels.empty();
     }
+    ~fiber();
 private:
-    fiber(void (*func)(void *));
-    fiber(const fiber &);
+    fiber(size_t stacksiz, void (*func)(void *), void *data);
+    fiber(const fiber &) = delete;
     ucontext_t context;
-    char stack[0x20000];
+    char *_stack;
+    size_t _stack_size;
     bool _terminated;
     void (*entry)(void *data);
     shared_ptr<fiber> self;
