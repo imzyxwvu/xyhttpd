@@ -14,7 +14,7 @@ const string http_transaction::WEBSOCKET_MAGIC("258EAFA5-E914-47DA-95CA-C5AB0DC8
 
 http_transaction::http_transaction(
     shared_ptr<http_connection> conn, shared_ptr<http_request> req) :
-    connection(conn), request(req), _headerSent(false),
+    connection(move(conn)), request(move(req)), _headerSent(false),
     _finished(false), _transfer_mode(UNDECIDED) {
     if(auto ctlen = request->header("content-length")) {
         int len = atoi(ctlen->c_str());
@@ -24,40 +24,39 @@ http_transaction::http_transaction(
         }
         char *buf = new char[len];
         char *bufpos = buf;
-        shared_ptr<rest_decoder> dec(new rest_decoder(len));
+        auto dec = make_shared<rest_decoder>(len);
         while(dec->more()) {
             auto str = connection->_strm->read<string_message>(dec);
             memcpy(bufpos, str->data(), str->serialize_size());
             bufpos += str->serialize_size();
         }
-        postdata = shared_ptr<string>(new string(buf, len));
+        postdata = make_shared<string>(buf, len);
         delete buf;
     }
     _response = make_shared<http_response>(200);
 }
 
 void http_transaction::forward_to(const string &host, int port) {
-    shared_ptr<ip_endpoint> ep(new ip_endpoint(host, port));
-    return forward_to(ep);
+    return forward_to(make_shared<ip_endpoint>(host, port));
 }
 
 void http_transaction::forward_to(shared_ptr<ip_endpoint> ep) {
     if(header_sent()) throw RTERR("header already sent");
-    shared_ptr<tcp_stream> strm(new tcp_stream);
+    auto strm = make_shared<tcp_stream>();
     strm->connect(ep);
-    shared_ptr<http_request> newreq(new http_request(*request));
-    newreq->set_header("X-Forwarded-For", connection->_peername);
-    newreq->delete_header("accept-encoding");
-    strm->write(newreq);
+    auto req = make_shared<http_request>(*request);
+    req->set_header("X-Forwarded-For", connection->_peername);
+    req->delete_header("accept-encoding");
+    strm->write(req);
     if(postdata) strm->write(*postdata);
     _response->set_code(100);
-    shared_ptr<http_response::decoder> respdec(new http_response::decoder());
+    auto respdec = make_shared<http_response::decoder>();
     while(_response->code() == 100)
         _response = strm->read<http_response>(respdec);
     if(auto contentLen = _response->header("Content-Length")) {
         int len = atoi(contentLen->c_str());
         declare_length(len);
-        auto dec = shared_ptr<rest_decoder>(new rest_decoder(len));
+        auto dec = make_shared<rest_decoder>(len);
         while(dec->more()) {
             auto msg = strm->read<string_message>(dec);
             write(msg->data(), msg->serialize_size());
@@ -98,7 +97,7 @@ void http_transaction::forward_to(shared_ptr<fcgi_connection> conn) {
     }
     if(postdata) conn->write(postdata);
     _response = conn->read<http_response>(make_shared<http_response::decoder>());
-    auto dec = shared_ptr<string_decoder>(new string_decoder());
+    auto dec = make_shared<string_decoder>();
     while(true) {
         auto msg = conn->read<string_message>(dec);
         if(!msg) break;

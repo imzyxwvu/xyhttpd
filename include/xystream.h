@@ -14,7 +14,7 @@ public:
     inline int_status(const int_status &s)
         : _status(s._status) {}
     static inline shared_ptr<int_status> make(int s) {
-        return shared_ptr<int_status>(new int_status(s));
+        return make_shared<int_status>(s);
     }
     inline int status() {
         return _status;
@@ -33,14 +33,14 @@ public:
 
     virtual void accept(uv_stream_t *);
     template<class T>
-    inline shared_ptr<T> read(shared_ptr<decoder> dec) {
+    inline shared_ptr<T> read(const shared_ptr<decoder> &dec) {
         auto msg = read(dec);
         return msg ? dynamic_pointer_cast<T>(msg) : nullptr;
     }
-    virtual shared_ptr<message> read(shared_ptr<decoder>);
+    virtual shared_ptr<message> read(const shared_ptr<decoder> &dec);
     virtual void write(const char *buf, int length);
     virtual bool has_tls();
-    void write(shared_ptr<message> msg);
+    void write(const shared_ptr<message> &msg);
     void write(const string &str);
     virtual ~stream();
 protected:
@@ -72,6 +72,7 @@ public:
     tcp_stream();
     virtual void connect(const string &host, int port);
     virtual void connect(shared_ptr<ip_endpoint> ep);
+    void nodelay(bool enable);
     shared_ptr<ip_endpoint> getpeername();
 private:
     virtual void connect(const sockaddr *sa);
@@ -103,7 +104,7 @@ private:
 class string_decoder : public decoder {
 public:
     string_decoder();
-    virtual bool decode(shared_ptr<streambuffer> &stb);
+    virtual bool decode(const shared_ptr<streambuffer> &stb);
     virtual shared_ptr<message> msg();
     virtual ~string_decoder();
 protected:
@@ -114,7 +115,7 @@ protected:
 class rest_decoder : public decoder {
 public:
     rest_decoder(int rest);
-    virtual bool decode(shared_ptr<streambuffer> &stb);
+    virtual bool decode(const shared_ptr<streambuffer> &stb);
     virtual shared_ptr<message> msg();
     virtual ~rest_decoder();
     inline bool more() { return nrest > 0; }

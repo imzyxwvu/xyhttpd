@@ -6,7 +6,7 @@
 
 http_service::~http_service() {}
 
-void http_service_chain::serve(shared_ptr<http_transaction> tx) {
+void http_service_chain::serve(http_trx &tx) {
     for(auto it = _svcs.cbegin(); it != _svcs.cend(); it++) {
         (*it)->serve(tx);
         if(tx->header_sent()) break;
@@ -51,7 +51,7 @@ void local_file_service::register_fcgi(const string &ext, shared_ptr<fcgi_provid
     _fcgi_providers[ext] = provider;
 }
 
-void local_file_service::serve(shared_ptr<http_transaction> tx) {
+void local_file_service::serve(http_trx &tx) {
     const char *requested_res = tx->request->path()->c_str();
     const char *tail = requested_res;
     struct stat info;
@@ -132,7 +132,7 @@ void local_file_service::serve(shared_ptr<http_transaction> tx) {
 
 logger_service::logger_service(ostream &os) : _os(os) {}
 
-void logger_service::serve(shared_ptr<http_transaction> tx) {
+void logger_service::serve(http_trx &tx) {
     _os<<"["<<timelabel()<<fmt(" %s] %s %s%s",
             tx->connection->peername()->c_str(),
             tx->request->method_name(),
@@ -142,7 +142,7 @@ void logger_service::serve(shared_ptr<http_transaction> tx) {
 
 tls_filter_service::tls_filter_service(int code) : _code(code) {}
 
-void tls_filter_service::serve(shared_ptr<http_transaction> tx) {
+void tls_filter_service::serve(http_trx &tx) {
     if(!tx->connection->has_tls()) {
         if(_code == 302) {
             tx->redirect_to(fmt("https://%s%s",
@@ -197,7 +197,7 @@ string host_dispatch_service::normalize_hostname(shared_ptr<string> hostname) {
     return string(buf, length);
 }
 
-void host_dispatch_service::serve(shared_ptr<http_transaction> tx) {
+void host_dispatch_service::serve(http_trx &tx) {
     auto host = tx->request->header("host");
     if(!host) {
         tx->display_error(400);
@@ -225,7 +225,7 @@ void proxy_pass_service::append(const string &host, int port) {
     append(make_shared<ip_endpoint>(host, port));
 }
 
-void proxy_pass_service::serve(shared_ptr<http_transaction> tx) {
+void proxy_pass_service::serve(http_trx &tx) {
     if(count() == 0)
         return;
     if(_cur >= count())
@@ -253,7 +253,7 @@ void plain_data_service::update_data(const string &data) {
     update_etag();
 }
 
-void plain_data_service::serve(shared_ptr<http_transaction> tx) {
+void plain_data_service::serve(http_trx &tx) {
     if(tx->request->method() != GET && tx->request->method() != HEAD) {
         tx->display_error(405);
         return;
@@ -274,13 +274,20 @@ void plain_data_service::serve(shared_ptr<http_transaction> tx) {
 }
 
 regex_route::regex_route(const string &pat, shared_ptr<http_service> svc)
-: _pattern(pat), _svc(svc) {}
+: _pattern(pat, regex_constants::optimize), _svc(svc) {}
 
 regex_route::regex_route(const regex &pat, shared_ptr<http_service> svc)
 : _pattern(pat), _svc(svc) {}
 
-void regex_route::serve(shared_ptr<http_transaction> tx) {
+void regex_route::serve(http_trx &tx) {
     smatch sm;
     if(regex_match(*tx->request->path(), sm, _pattern))
         _svc->serve(tx);
+}
+
+lambda_service::lambda_service(const function<void(http_trx &)> &func)
+: _func(func) {}
+
+void lambda_service::serve(http_trx &tx) {
+    _func(tx);
 }

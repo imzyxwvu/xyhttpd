@@ -6,7 +6,7 @@
 #include "xystream.h"
 #include "xyfcgi.h"
 
-#include <map>
+#include <unordered_map>
 #include <uv.h>
 #include <vector>
 
@@ -30,7 +30,7 @@ public:
     }
     bool header_include(const string &key, const string &kw);
     inline void set_header(const string &key, shared_ptr<string> val) {
-        _headers[key] = val;
+        _headers[key] = move(val);
     }
     inline void set_header(const string &key, const string &val) {
         _headers[key] = make_shared<string>(val);
@@ -43,13 +43,13 @@ public:
     virtual int serialize_size();
     virtual void serialize(char *buf);
 
-    map<string, shared_ptr<string>>::const_iterator hbegin() const;
-    map<string, shared_ptr<string>>::const_iterator hend() const;
+    unordered_map<string, shared_ptr<string>>::const_iterator hbegin() const;
+    unordered_map<string, shared_ptr<string>>::const_iterator hend() const;
 
     class decoder : public ::decoder {
     public:
         decoder();
-        virtual bool decode(shared_ptr<streambuffer> &stb);
+        virtual bool decode(const shared_ptr<streambuffer> &stb);
         virtual shared_ptr<message> msg();
         virtual ~decoder();
     private:
@@ -63,7 +63,7 @@ private:
     shared_ptr<string> _resource;
     shared_ptr<string> _path;
     shared_ptr<string> _query;
-    map<string, shared_ptr<string>> _headers;
+    unordered_map<string, shared_ptr<string>> _headers;
 
     http_request &operator=(const http_request &);
 
@@ -95,7 +95,7 @@ public:
     class decoder : public ::decoder {
     public:
         decoder();
-        virtual bool decode(shared_ptr<streambuffer> &stb);
+        virtual bool decode(const shared_ptr<streambuffer> &stb);
         virtual shared_ptr<message> msg();
         virtual ~decoder();
     private:
@@ -106,7 +106,7 @@ public:
     };
 private:
     int _code;
-    map<string, shared_ptr<string>> _headers;
+    unordered_map<string, shared_ptr<string>> _headers;
     vector<shared_ptr<string>> _cookies;
 
     http_response &operator=(const http_response &);
@@ -115,7 +115,7 @@ private:
 class http_transfer_decoder : public string_decoder {
 public:
     http_transfer_decoder(shared_ptr<string> transferEnc);
-    virtual bool decode(shared_ptr<streambuffer> &stb);
+    virtual bool decode(const shared_ptr<streambuffer> &stb);
 private:
     bool _chunked;
 };
@@ -158,9 +158,11 @@ private:
     shared_ptr<http_response> _response;
 };
 
+typedef const shared_ptr<http_transaction> http_trx;
+
 class http_service {
 public:
-    virtual void serve(shared_ptr<http_transaction> tx) = 0;
+    virtual void serve(http_trx &tx) = 0;
     virtual ~http_service() = 0;
 };
 
@@ -171,7 +173,7 @@ public:
                     shared_ptr<string> pname);
     virtual shared_ptr<http_request> next_request();
     virtual shared_ptr<stream> upgrade();
-    virtual void invoke_service(shared_ptr<http_transaction> tx);
+    virtual void invoke_service(http_trx &tx);
     virtual bool keep_alive();
     inline shared_ptr<string> peername() {
         return _peername;

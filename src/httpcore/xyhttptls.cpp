@@ -73,7 +73,7 @@ void tls_stream::_put_incoming(const char *buf, int length) {
     }
 }
 
-shared_ptr<message> tls_stream::read(shared_ptr<decoder> decoder) {
+shared_ptr<message> tls_stream::read(const shared_ptr<decoder> &decoder) {
     if(reading_fiber)
         throw RTERR("reading from a stream occupied by another fiber");
     do_handshake();
@@ -83,7 +83,7 @@ shared_ptr<message> tls_stream::read(shared_ptr<decoder> decoder) {
         if(decoder->decode(buffer))
             return decoder->msg();
     while(true) {
-        char *buf = (char *)buffer->prepare(0x8000);
+        char *buf = buffer->prepare(0x8000);
         int nread = SSL_read(_ssl, buf, 0x8000);
         if(nread < 0) {
             nread = SSL_get_error(_ssl, nread);
@@ -126,7 +126,6 @@ void tls_stream::write(const char *buf, int length) {
 
 
 static void tls_stream_on_alloc(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    tls_stream *self = (tls_stream *)handle->data;
     buf->base = (char *)malloc(suggested_size);
     buf->len = buf->base ? suggested_size : 0;
 }
@@ -145,7 +144,7 @@ bool tls_stream::handle_want(int r) {
         char *buf = new char[pendingBytes];
         BIO_read(_txbio, buf, pendingBytes);
         tcp_stream::write(buf, pendingBytes);
-        delete buf;
+        delete[] buf;
     }
     if(r == SSL_ERROR_WANT_WRITE)
         return true;
@@ -208,7 +207,7 @@ void tls_context::use_certificate(const char *file, const char *key) {
 
 static int tls_sni_callback(SSL *ssl, int *ad, void *arg) {
     const char* hostName = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
-
+    // TODO: Implement SNI support
 }
 
 void tls_context::register_context(const string &hostname, tls_context &ctx) {

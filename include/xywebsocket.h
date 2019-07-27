@@ -10,7 +10,7 @@ public:
     class decoder : public ::decoder {
     public:
         decoder(int maxPayloadLen);
-        virtual bool decode(shared_ptr<streambuffer> &stb);
+        virtual bool decode(const shared_ptr<streambuffer> &stb);
         virtual shared_ptr<message> msg();
     private:
         int _max_payload;
@@ -34,12 +34,12 @@ private:
 
 class websocket : public message_sink {
 public:
-    websocket(shared_ptr<stream> strm);
+    explicit websocket(const shared_ptr<stream> &strm);
     shared_ptr<string> read();
     virtual ~websocket();
     void flush_writing();
-    void enq_message(shared_ptr<websocket_frame> msg);
-    virtual void enq_message(shared_ptr<string> msg);
+    void enq_message(const shared_ptr<websocket_frame> &msg);
+    virtual void enq_message(const shared_ptr<string> &msg);
 
 private:
     shared_ptr<stream> _strm;

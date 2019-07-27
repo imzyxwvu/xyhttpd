@@ -33,7 +33,6 @@ public:
     inline int size() const { return _size; }
     inline char *data() const { return (char *)_data; };
     virtual ~streambuffer();
-    static shared_ptr<streambuffer> alloc();
 private:
     char *_data;
     int _size;
@@ -44,7 +43,7 @@ private:
 
 class decoder {
 public:
-    virtual bool decode(shared_ptr<streambuffer> &stb) = 0;
+    virtual bool decode(const shared_ptr<streambuffer> &stb) = 0;
     virtual shared_ptr<message> msg() = 0;
     virtual ~decoder() = 0;
 };

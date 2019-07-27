@@ -3,10 +3,7 @@
 #include <iostream>
 #include "xyfcgi.h"
 
-fcgi_message::decoder::decoder() {
-}
-
-bool fcgi_message::decoder::decode(shared_ptr <streambuffer> &stb) {
+bool fcgi_message::decoder::decode(const shared_ptr<streambuffer> &stb) {
     if(stb->size() >= 8) {
         unsigned char *buf = (unsigned char *)stb->data();
         unsigned char msgType = buf[1];
@@ -17,10 +14,9 @@ bool fcgi_message::decoder::decode(shared_ptr <streambuffer> &stb) {
             throw runtime_error("FastCGI version error");
         size_t expectedLength = 8 + length + paddingLen;
         if(stb->size() >= expectedLength) {
-            fcgi_message *msg = new fcgi_message(
+            _msg = make_shared<fcgi_message>(
                     (message_type)msgType, requestId, (char *)buf + 8, length);
             stb->pull(expectedLength);
-            _msg = shared_ptr<fcgi_message>(msg);
             return true;
         }
     }
@@ -76,7 +72,7 @@ shared_ptr<fcgi_message> fcgi_message::make_dummy(fcgi_message::message_type t) 
 }
 
 fcgi_connection::fcgi_connection(const shared_ptr<stream> &strm, int roleId)
-	: _strm(strm), _envready(false), _buffer(new streambuffer()) {
+	: _strm(strm), _envready(false), _buffer(make_shared<streambuffer>()) {
     unsigned char requestBegin[8] = { 0, (unsigned char)roleId, 0, 0, 0, 0, 0, 0};
     _strm->write(make_shared<fcgi_message>(
             fcgi_message::message_type::FCGI_BEGIN_REQUEST, 0, (char *)requestBegin, 8));
@@ -127,7 +123,7 @@ void fcgi_connection::write(const char *data, int len) {
     _strm->write(make_shared<fcgi_message>(fcgi_message::message_type::FCGI_STDIN, 0, data, len));
 }
 
-void fcgi_connection::write(shared_ptr<string> msg) {
+void fcgi_connection::write(const shared_ptr<string> &msg) {
     write(msg->data(), msg->size());
 }
 
@@ -164,9 +160,9 @@ tcp_fcgi_provider::tcp_fcgi_provider(const string &host, int port)
 
 shared_ptr<fcgi_connection> tcp_fcgi_provider::get_connection()
 {
-    shared_ptr<tcp_stream> strm(new tcp_stream);
+    auto strm = make_shared<tcp_stream>();
     strm->connect(_hostip, _port);
-    return shared_ptr<fcgi_connection>(new fcgi_connection(strm, 1));
+    return make_shared<fcgi_connection>(strm, 1);
 }
 
 unix_fcgi_provider::unix_fcgi_provider(const string &p)
@@ -177,7 +173,7 @@ unix_fcgi_provider::unix_fcgi_provider(shared_ptr<string> p)
 
 shared_ptr<fcgi_connection> unix_fcgi_provider::get_connection()
 {
-    shared_ptr<unix_stream> strm(new unix_stream);
+    auto strm = make_shared<unix_stream>();
     strm->connect(_path);
-    return shared_ptr<fcgi_connection>(new fcgi_connection(strm, 1));
+    return make_shared<fcgi_connection>(strm, 1);
 }

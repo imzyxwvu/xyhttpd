@@ -63,8 +63,8 @@ http_request::~http_request() {}
 
 http_request::decoder::decoder() {}
 
-bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
-    shared_ptr<http_request> req(new http_request());
+bool http_request::decoder::decode(const shared_ptr<streambuffer> &stb) {
+    auto req = make_shared<http_request>();
     const char *chunk = stb->data();
     int i = 0, currentExpect = 0, currentBase;
     int verbOrKeyLength;
@@ -90,7 +90,7 @@ bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
                     memcpy(method, chunk, verbOrKeyLength);
                     method[verbOrKeyLength] = 0;
                     req->set_method(method);
-                    req->_resource = shared_ptr<string>(new string(CURRENT_VALUE));
+                    req->_resource = make_shared<string>(CURRENT_VALUE);
                     currentBase = i + 1;
                     currentExpect = 2;
                 }
@@ -157,7 +157,7 @@ bool http_request::decoder::decode(shared_ptr<streambuffer> &stb) {
                     break;
                 else if(chunk[i] == '\n' || chunk[i] == '\r') {
                     req->_headers[string(headerKey, verbOrKeyLength)]
-                            = shared_ptr<string>(new string(CURRENT_VALUE));
+                            = make_shared<string>(CURRENT_VALUE);
                     currentBase = i + 1;
                     currentExpect = chunk[i] == '\r' ? 100 : 4;
                     break;
@@ -203,11 +203,11 @@ bool http_request::header_include(const string &key, const string &kw) {
     return it->second->find(kw) != -1;
 }
 
-map<string, shared_ptr<string>>::const_iterator http_request::hbegin() const {
+unordered_map<string, shared_ptr<string>>::const_iterator http_request::hbegin() const {
     return _headers.cbegin();
 }
 
-map<string, shared_ptr<string>>::const_iterator http_request::hend() const {
+unordered_map<string, shared_ptr<string>>::const_iterator http_request::hend() const {
     return _headers.cend();
 }
 

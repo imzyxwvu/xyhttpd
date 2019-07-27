@@ -10,7 +10,7 @@ void message_sink::send(shared_ptr<string> str) {
 
 message_sink::~message_sink() {}
 
-void message_broadcaster::enq_message(shared_ptr<string> msg) {
+void message_broadcaster::enq_message(const shared_ptr<string> &msg) {
     broadcast(msg, nullptr);
 }
 

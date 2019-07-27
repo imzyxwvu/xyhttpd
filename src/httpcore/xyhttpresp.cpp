@@ -105,7 +105,7 @@ http_response::~http_response() {}
 
 http_response::decoder::decoder() {}
 
-bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
+bool http_response::decoder::decode(const shared_ptr<streambuffer> &stb) {
     shared_ptr<http_response> resp;
     const char *chunk = stb->data();
     int i = 0, currentExpect = 0, currentBase = 0;
@@ -127,7 +127,7 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                     currentExpect = 1;
                 }
                 else if(chunk[i] == ':') {
-                    resp = shared_ptr<http_response>(new http_response(200));
+                    resp = make_shared<http_response>(200);
                     verbOrKeyLength = i - currentBase;
                     currentExpect = 5;
                 }
@@ -148,8 +148,7 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                 break;
             case 2: // expect HTTP status code
                 if(chunk[i] == ' ') {
-                    resp = shared_ptr<http_response>(
-                        new http_response(atoi(chunk + currentBase)));
+                    resp = make_shared<http_response>(atoi(chunk + currentBase));
                     currentBase = i + 1;
                     currentExpect = 3;
                 }
@@ -227,7 +226,7 @@ http_transfer_decoder::http_transfer_decoder(shared_ptr<string> transferEnc) {
     _chunked = transferEnc && transferEnc->find("chunked") != -1;
 }
 
-bool http_transfer_decoder::decode(shared_ptr<streambuffer> &stb) {
+bool http_transfer_decoder::decode(const shared_ptr<streambuffer> &stb) {
     if(_chunked) {
         if(stb->size() > 3) {
             char *end;

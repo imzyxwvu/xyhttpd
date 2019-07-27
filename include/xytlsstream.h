@@ -3,6 +3,7 @@
 
 #include "xystream.h"
 
+#include <map>
 #include <openssl/ssl.h>
 
 class tls_context {
@@ -28,7 +29,7 @@ public:
 
     void _put_incoming(const char *buf, int length);
     virtual void connect(const string &host, int port);
-    virtual shared_ptr<message> read(shared_ptr<decoder>);
+    virtual shared_ptr<message> read(const shared_ptr<decoder> &);
     virtual void write(const char *buf, int length);
     virtual void accept(uv_stream_t *);
     virtual bool has_tls();

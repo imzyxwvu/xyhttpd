@@ -32,7 +32,7 @@ void streambuffer::append(const void *buffer, int nbytes) {
 }
 
 char *streambuffer::prepare(int nbytes) {
-    char *p = (char *)realloc((char *)_data, _size + nbytes);
+    char *p = (char *)realloc(_data, _size + nbytes);
     if(p) {
         _data = p;
         return _data + _size;

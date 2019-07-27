@@ -4,7 +4,7 @@
 websocket_frame::decoder::decoder(int maxPayloadLen)
     : _max_payload(maxPayloadLen) {}
 
-bool websocket_frame::decoder::decode(shared_ptr<streambuffer> &stb) {
+bool websocket_frame::decoder::decode(const shared_ptr<streambuffer> &stb) {
     char *frame = stb->data();
     int opcode_and_fin, payload_length, masked;
     char mask[4];
@@ -57,7 +57,7 @@ websocket_frame::websocket_frame(int op, shared_ptr<string> pl)
 : _op(op), _payload(pl) {}
 
 websocket_frame::websocket_frame(int op, const char *pl, int len)
-: _op(op), _payload(new string(pl, len)) {}
+: _op(op), _payload(make_shared<string>(pl, len)) {}
 
 int websocket_frame::type() const {
     return XY_MESSAGE_WSFRAME;
@@ -106,8 +106,8 @@ static void websocket_flush_thread(void *data) {
     ws->flush_writing();
 }
 
-websocket::websocket(shared_ptr<stream> strm) :
-    _strm(strm), _decoder(new websocket_frame::decoder(0x100000)) {
+websocket::websocket(const shared_ptr<stream> &strm) :
+    _strm(strm), _decoder(make_shared<websocket_frame::decoder>(0x100000)) {
     _flush_thread = fiber::make(websocket_flush_thread, this);
     _flush_thread->resume();
 }
@@ -154,11 +154,11 @@ shared_ptr<string> websocket::read() {
     }
 }
 
-void websocket::enq_message(shared_ptr<string> str) {
+void websocket::enq_message(const shared_ptr<string> &str) {
     enq_message(make_shared<websocket_frame>(1, str));
 }
 
-void websocket::enq_message(shared_ptr<websocket_frame> msg) {
+void websocket::enq_message(const shared_ptr<websocket_frame> &msg) {
     _writing_queue.push(msg);
     if(_flush_paused) _flush_thread->resume();
 }
