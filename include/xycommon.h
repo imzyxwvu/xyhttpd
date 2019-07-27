@@ -33,7 +33,6 @@ public:
     inline int size() const { return _size; }
     inline char *data() const { return (char *)_data; };
     virtual ~streambuffer();
-    static shared_ptr<streambuffer> alloc();
 private:
     char *_data;
     int _size;

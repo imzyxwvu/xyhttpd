@@ -9,33 +9,44 @@ shared_ptr<fiber> fiber::_last_breathe;
 
 wakeup_event::~wakeup_event() {}
 
-static void fiber_wrapper(fiber *f, void *data)
-{
-    f->invoke(data);
-    fiber::finalize();
+queue<shared_ptr<fiber::stack_mem>> fiber::stack_pool;
+int fiber::stack_pool_target = 32;
+
+fiber::stack_mem::stack_mem(int siz) : _size(siz) {
+    _base = (char *)mmap(NULL, _size, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANON, -1, 0);
+    if(!_base)
+        throw RTERR("cannot allocate stack space for fiber");
+    mprotect(_base, getpagesize(), PROT_NONE);
 }
 
-fiber::fiber(size_t stacksiz, void (*func)(void *), void *data)
-: _stack_size(stacksiz), entry(func) {
-    _stack = (char *)mmap(NULL, stacksiz, PROT_READ | PROT_WRITE,
-            MAP_PRIVATE | MAP_ANON, -1, 0);
-    if(!_stack)
-        throw RTERR("cannot allocate stack space for fiber");
-    *((ucontext_t **)_stack) = &context;
-    mprotect(_stack, getpagesize(), PROT_READ);
+fiber::stack_mem::~stack_mem() {
+    munmap(_base, _size);
+}
+
+fiber::fiber(void (*func)(void *), void *data)
+: entry(func) {
+    if(stack_pool.empty()) {
+        _stack = make_shared<stack_mem>(0x200000);
+    } else {
+        _stack = stack_pool.front();
+        stack_pool.pop();
+    }
     getcontext(&context);
-    context.uc_stack.ss_sp = _stack;
-    context.uc_stack.ss_size = _stack_size;
+    context.uc_stack.ss_sp = _stack->base();
+    context.uc_stack.ss_size = _stack->size();
     context.uc_link = NULL;
-    makecontext(&context, (void(*)(void))fiber_wrapper, 2, this, data);
+    makecontext(&context, (void(*)(void))fiber::wrapper, 2, this, data);
     _terminated = false;
 }
 
 fiber::~fiber() {
-    munmap(_stack, _stack_size);
+    if(stack_pool.size() < stack_pool_target)
+        stack_pool.push(_stack);
 }
 
-void fiber::finalize() {
+void fiber::wrapper(fiber *f, void *data) {
+    f->invoke(data);
     _last_breathe = levels.top();
     levels.pop();
     swapcontext(&_last_breathe->context,
@@ -43,7 +54,7 @@ void fiber::finalize() {
 }
 
 shared_ptr<fiber> fiber::make(void (*entry)(void *), void *data) {
-    shared_ptr<fiber> f(new fiber(0x100000, entry, data));
+    auto f = make_shared<fiber>(entry, data);
     f->self = f;
     return f;
 }

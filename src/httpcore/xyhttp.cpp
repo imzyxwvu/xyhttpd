@@ -5,7 +5,7 @@
 
 http_connection::http_connection(
     shared_ptr<http_service> svc, shared_ptr<stream> strm, shared_ptr<string> pname)
-    : _reqdec(new http_request::decoder()), _svc(svc), _strm(strm),
+    : _reqdec(make_shared<http_request::decoder>()), _svc(svc), _strm(strm),
       _keep_alive(true), _upgraded(false), _peername(pname) {}
 
 shared_ptr<http_request> http_connection::next_request() {
@@ -98,8 +98,9 @@ static void http_service_loop(void *data) {
         try {
             req = conn->next_request();
             if(!req) break;
-            shared_ptr<http_transaction> tx(new http_transaction(conn, req));
-            conn->invoke_service(tx);
+            shared_ptr<http_transaction> tx();
+            conn->invoke_service(
+                    make_shared<http_transaction>(conn, move(req)));
         }
         catch(exception &ex) {
             cerr<<"["<<timelabel()<<" "<<conn->peername()->c_str()<<"] "
@@ -115,6 +116,7 @@ static void http_server_on_connection(uv_stream_t* strm, int status) {
         tcp_stream *client = new tcp_stream();
         try {
             client->accept(strm);
+            client->nodelay(true);
         }
         catch(exception &ex) {
             delete client;

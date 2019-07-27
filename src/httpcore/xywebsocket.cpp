@@ -57,7 +57,7 @@ websocket_frame::websocket_frame(int op, shared_ptr<string> pl)
 : _op(op), _payload(pl) {}
 
 websocket_frame::websocket_frame(int op, const char *pl, int len)
-: _op(op), _payload(new string(pl, len)) {}
+: _op(op), _payload(make_shared<string>(pl, len)) {}
 
 int websocket_frame::type() const {
     return XY_MESSAGE_WSFRAME;
@@ -107,7 +107,7 @@ static void websocket_flush_thread(void *data) {
 }
 
 websocket::websocket(shared_ptr<stream> strm) :
-    _strm(strm), _decoder(new websocket_frame::decoder(0x100000)) {
+    _strm(strm), _decoder(make_shared<websocket_frame::decoder>(0x100000)) {
     _flush_thread = fiber::make(websocket_flush_thread, this);
     _flush_thread->resume();
 }

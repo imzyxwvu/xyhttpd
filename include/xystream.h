@@ -72,6 +72,7 @@ public:
     tcp_stream();
     virtual void connect(const string &host, int port);
     virtual void connect(shared_ptr<ip_endpoint> ep);
+    void nodelay(bool enable);
     shared_ptr<ip_endpoint> getpeername();
 private:
     virtual void connect(const sockaddr *sa);

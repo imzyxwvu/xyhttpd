@@ -6,7 +6,7 @@
 #include "xystream.h"
 #include "xyfcgi.h"
 
-#include <map>
+#include <unordered_map>
 #include <uv.h>
 #include <vector>
 
@@ -30,7 +30,7 @@ public:
     }
     bool header_include(const string &key, const string &kw);
     inline void set_header(const string &key, shared_ptr<string> val) {
-        _headers[key] = val;
+        _headers[key] = move(val);
     }
     inline void set_header(const string &key, const string &val) {
         _headers[key] = make_shared<string>(val);
@@ -43,8 +43,8 @@ public:
     virtual int serialize_size();
     virtual void serialize(char *buf);
 
-    map<string, shared_ptr<string>>::const_iterator hbegin() const;
-    map<string, shared_ptr<string>>::const_iterator hend() const;
+    unordered_map<string, shared_ptr<string>>::const_iterator hbegin() const;
+    unordered_map<string, shared_ptr<string>>::const_iterator hend() const;
 
     class decoder : public ::decoder {
     public:
@@ -63,7 +63,7 @@ private:
     shared_ptr<string> _resource;
     shared_ptr<string> _path;
     shared_ptr<string> _query;
-    map<string, shared_ptr<string>> _headers;
+    unordered_map<string, shared_ptr<string>> _headers;
 
     http_request &operator=(const http_request &);
 
@@ -106,7 +106,7 @@ public:
     };
 private:
     int _code;
-    map<string, shared_ptr<string>> _headers;
+    unordered_map<string, shared_ptr<string>> _headers;
     vector<shared_ptr<string>> _cookies;
 
     http_response &operator=(const http_response &);

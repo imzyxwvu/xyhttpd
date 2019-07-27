@@ -8,7 +8,7 @@ const char *int_status::strerror() {
 
 int_status::~int_status() {}
 
-stream::stream() : buffer(new streambuffer()) {
+stream::stream() : buffer(make_shared<streambuffer>()) {
     _wreq.data = this;
 }
 
@@ -20,7 +20,7 @@ void stream::accept(uv_stream_t *svr) {
 
 static void stream_on_alloc(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
     stream *self = (stream *)handle->data;
-    buf->base = (char *)self->buffer->prepare(suggested_size);
+    buf->base = self->buffer->prepare(suggested_size);
     buf->len = buf->base ? suggested_size : 0;
 }
 
@@ -147,8 +147,8 @@ void tcp_stream::connect(const sockaddr *sa) {
     req->data = this;
     int r = uv_tcp_connect(req, (uv_tcp_t *)handle, sa, tcp_on_connect);
     if(r < 0) {
-        throw IOERR(r);
         delete req;
+        throw IOERR(r);
     }
     writing_fiber = fiber::current();
     auto s = fiber::yield<int_status>();
@@ -157,13 +157,18 @@ void tcp_stream::connect(const sockaddr *sa) {
         throw IOERR(s->status());
 }
 
+void tcp_stream::nodelay(bool enable) {
+    int r = uv_tcp_nodelay((uv_tcp_t *)handle, enable);
+    if(r < 0) throw IOERR(r);
+}
+
 shared_ptr<ip_endpoint> tcp_stream::getpeername() {
     struct sockaddr_storage address;
     int addrlen = sizeof(address);
     int r = uv_tcp_getpeername(
         (uv_tcp_t *)handle, (struct sockaddr*)&address, &addrlen);
     if(r < 0) throw IOERR(r);
-    return shared_ptr<ip_endpoint>(new ip_endpoint(&address));
+    return make_shared<ip_endpoint>(&address);
 }
 
 unix_stream::unix_stream() {
@@ -227,7 +232,7 @@ shared_ptr<string> ip_endpoint::straddr() {
         uv_inet_ntop(AF_INET, &_sa_in.sin_addr, ip, sizeof(ip));
     else if (_sa.ss_family == AF_INET6)
         uv_inet_ntop(AF_INET6, &_sa_in6.sin6_addr, ip, sizeof(ip));
-    return shared_ptr<string>(new string(ip));
+    return make_shared<string>(ip);
 }
 
 string_message::string_message(const string &s)
@@ -255,8 +260,7 @@ string_decoder::string_decoder() : nbyte(0), buffer(nullptr) {}
 
 shared_ptr<message> string_decoder::msg() {
     if(buffer)
-        return shared_ptr<string_message>(
-            new string_message(buffer, nbyte));
+        return make_shared<string_message>(buffer, nbyte);
     return nullptr;
 }
 

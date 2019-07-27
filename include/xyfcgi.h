@@ -5,7 +5,7 @@
 #include "xyfiber.h"
 #include "xystream.h"
 
-#include <map>
+#include <unordered_map>
 #include <uv.h>
 
 class fcgi_message : public message {
@@ -41,7 +41,6 @@ public:
 
     class decoder : public ::decoder {
     public:
-        decoder();
         virtual bool decode(shared_ptr<streambuffer> &stb);
         virtual shared_ptr<message> msg();
         virtual ~decoder();
@@ -76,7 +75,7 @@ private:
     fcgi_connection(const fcgi_connection &);
 
     void flush_env();
-    map<string, shared_ptr<string>> _env;
+    unordered_map<string, shared_ptr<string>> _env;
     shared_ptr<stream> _strm;
     bool _envready;
     shared_ptr<streambuffer> _buffer;

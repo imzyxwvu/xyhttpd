@@ -127,7 +127,7 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                     currentExpect = 1;
                 }
                 else if(chunk[i] == ':') {
-                    resp = shared_ptr<http_response>(new http_response(200));
+                    resp = make_shared<http_response>(200);
                     verbOrKeyLength = i - currentBase;
                     currentExpect = 5;
                 }
@@ -148,8 +148,7 @@ bool http_response::decoder::decode(shared_ptr<streambuffer> &stb) {
                 break;
             case 2: // expect HTTP status code
                 if(chunk[i] == ' ') {
-                    resp = shared_ptr<http_response>(
-                        new http_response(atoi(chunk + currentBase)));
+                    resp = make_shared<http_response>(atoi(chunk + currentBase));
                     currentBase = i + 1;
                     currentExpect = 3;
                 }

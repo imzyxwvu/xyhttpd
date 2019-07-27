@@ -3,6 +3,7 @@
 
 #include "xystream.h"
 
+#include <map>
 #include <openssl/ssl.h>
 
 class tls_context {
