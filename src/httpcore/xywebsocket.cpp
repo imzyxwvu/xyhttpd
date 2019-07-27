@@ -107,19 +107,24 @@ static void websocket_flush_thread(void *data) {
 }
 
 websocket::websocket(shared_ptr<stream> strm) :
-    _strm(strm), _ready(true),
-    _decoder(new websocket_frame::decoder(0x100000)) {
+    _strm(strm), _decoder(new websocket_frame::decoder(0x100000)) {
     _flush_thread = fiber::make(websocket_flush_thread, this);
     _flush_thread->resume();
 }
 
 void websocket::flush_writing() {
-    while(_ready) {
+    while(_alive) {
         _flush_paused = false;
         while(!_writing_queue.empty()) {
             auto msg = _writing_queue.front();
             _writing_queue.pop();
-            _strm->write(msg);
+            try {
+                _strm->write(msg);
+            }
+            catch(exception &ex) {
+                _alive = false;
+                return;
+            }
         }
         _flush_paused = true;
         fiber::yield();
@@ -127,29 +132,29 @@ void websocket::flush_writing() {
 }
 
 shared_ptr<string> websocket::read() {
-    while(_ready) {
-        auto frame = _strm->read<websocket_frame>(_decoder);
-        switch(frame->opcode()) {
-            case 0: case 1: // DATA OR TEXT
-                return frame->payload();
-            case 8: // CLOSE
-                _ready = false;
-                if(_flush_paused) _flush_thread->resume();
-                return nullptr;
-            case 9: // PING
-                enq_message(make_shared<websocket_frame>(10, frame->payload()));
-                break;
-            default:
-                throw RTERR("unknown WebSocket opcode - %d", frame->opcode());
+    while(_alive) {
+        try {
+            auto frame = _strm->read<websocket_frame>(_decoder);
+            switch(frame->opcode()) {
+                case 0: case 1: // DATA OR TEXT
+                    return frame->payload();
+                case 8: // CLOSE
+                    _alive = false;
+                    if(_flush_paused) _flush_thread->resume();
+                    return nullptr;
+                case 9: // PING
+                    enq_message(make_shared<websocket_frame>(10, frame->payload()));
+                    break;
+            }
+        }
+        catch(runtime_error &ex) {
+            _alive = false;
+            throw ex;
         }
     }
 }
 
-void websocket::send(const string &str) {
-    enq_message(make_shared<websocket_frame>(1, make_shared<string>(str)));
-}
-
-void websocket::send(shared_ptr<string> str) {
+void websocket::enq_message(shared_ptr<string> str) {
     enq_message(make_shared<websocket_frame>(1, str));
 }
 

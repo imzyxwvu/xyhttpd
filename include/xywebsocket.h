@@ -2,6 +2,7 @@
 #define XYHTTPD_XYWEBSOCKET_H
 
 #include "xystream.h"
+#include "xymsgsink.h"
 #include <queue>
 
 class websocket_frame : public message {
@@ -31,19 +32,19 @@ private:
     shared_ptr<string> _payload;
 };
 
-class websocket {
+class websocket : public message_sink {
 public:
     websocket(shared_ptr<stream> strm);
     shared_ptr<string> read();
-    void send(const string &str);
-    void send(shared_ptr<string> str);
     virtual ~websocket();
     void flush_writing();
     void enq_message(shared_ptr<websocket_frame> msg);
+    virtual void enq_message(shared_ptr<string> msg);
+
 private:
     shared_ptr<stream> _strm;
     shared_ptr<fiber> _flush_thread;
-    bool _flush_paused, _ready;
+    bool _flush_paused;
     shared_ptr<websocket_frame::decoder> _decoder;
     queue<shared_ptr<websocket_frame>> _writing_queue;
 };
