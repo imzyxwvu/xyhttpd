@@ -118,7 +118,6 @@ static void http_server_on_connection(uv_stream_t* strm, int status) {
         }
         catch(exception &ex) {
             delete client;
-            cout<<ex.what()<<endl;
             return;
         }
         self->start_thread(shared_ptr<stream>(client),

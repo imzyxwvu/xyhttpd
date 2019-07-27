@@ -191,7 +191,7 @@ shared_ptr<websocket> http_transaction::accept_websocket() {
 void http_transaction::redirect_to(const string &dest) {
     auto resp = get_response(302);
     resp->set_header("Location", dest);
-    flush_response();
+    finish();
 }
 
 void http_transaction::display_error(int code) {
