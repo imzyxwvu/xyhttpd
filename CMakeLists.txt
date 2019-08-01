@@ -32,3 +32,6 @@ target_link_libraries(xyhttpd iocore)
 
 add_executable(tinyhttpd src/tinyhttpd/tinyhttpd.cpp)
 target_link_libraries(tinyhttpd iocore)
+
+add_executable(iomaster src/iomaster/iomaster.cpp src/iomaster/iomnbd.cpp)
+target_link_libraries(iomaster iocore)
