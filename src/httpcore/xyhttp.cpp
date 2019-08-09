@@ -30,6 +30,7 @@ bool http_connection::keep_alive() {
 
 shared_ptr<stream> http_connection::upgrade() {
     _upgraded = true;
+    _strm->set_timeout(0);
     return _strm;
 }
 
@@ -49,13 +50,14 @@ void http_connection::invoke_service(http_trx &tx) {
             return;
         }
         auto resp = tx->get_response(500);
-        char **trace = ex.stacktrace();
         resp->set_header("Content-Type", "text/html");
         tx->write(fmt("<html><head><title>XWSG Internal Error</title></head>"
                       "<body><h1>500 Internal Server Error</h1><p><span>%s:%d:</span> %s</p>"
                       "<ul style=\"color:gray\">", ex.filename(), ex.lineno(), ex.what()));
+        char **trace = ex.stacktrace();
         for(int i = 0; i < ex.tracedepth(); i++)
             tx->write(fmt("<li>%s</li>", trace[i]));
+        free(trace);
         tx->write(fmt("</ul><i style=\"font-size:.8em\">%s</i></body></html>",
                       http_transaction::SERVER_VERSION.c_str()));
     }
@@ -80,7 +82,7 @@ bool http_connection::has_tls() {
 }
 
 http_server::http_server(shared_ptr<http_service> svc) : service(svc) {
-    _server = (uv_tcp_t *)malloc(sizeof(uv_tcp_t));
+    _server = mem_alloc<uv_tcp_t>();
     if(uv_tcp_init(uv_default_loop(), _server) < 0) {
         free(_server);
         throw runtime_error("failed to initialize libuv TCP stream");
@@ -90,25 +92,6 @@ http_server::http_server(shared_ptr<http_service> svc) : service(svc) {
 
 http_server::http_server(http_service *svc)
         : http_server(shared_ptr<http_service>(svc)) {}
-
-static void http_service_loop(void *data) {
-    shared_ptr<http_connection> conn((http_connection *)data);
-    while(conn->keep_alive()) {
-        shared_ptr<http_request> req;
-        try {
-            req = conn->next_request();
-            if(!req) break;
-            shared_ptr<http_transaction> tx();
-            conn->invoke_service(
-                    make_shared<http_transaction>(conn, move(req)));
-        }
-        catch(exception &ex) {
-            cerr<<"["<<timelabel()<<" "<<conn->peername()->c_str()<<"] "
-                <<ex.what()<<endl;
-            break;
-        }
-    }
-}
 
 static void http_server_on_connection(uv_stream_t* strm, int status) {
     http_server *self = (http_server *)strm->data;
@@ -128,9 +111,26 @@ static void http_server_on_connection(uv_stream_t* strm, int status) {
 }
 
 void http_server::start_thread(shared_ptr<stream> strm, shared_ptr<string> pname) {
-    shared_ptr<fiber> f = fiber::make(http_service_loop,
-            new http_connection(service, strm, pname));
-    f->resume();
+    auto conn = make_shared<http_connection>(service, strm, pname);
+    fiber::launch([conn] () {
+        while(conn->keep_alive()) {
+            shared_ptr<http_request> req;
+            try {
+                req = conn->next_request();
+                if(!req) break;
+                shared_ptr<http_transaction> tx();
+                conn->invoke_service(
+                        make_shared<http_transaction>(conn, move(req)));
+            }
+            catch(exception &ex) {
+                if(strstr(ex.what(), "connection timed out"))
+                    break;
+                cerr<<"["<<timelabel()<<" "<<conn->peername()->c_str()<<"] "
+                    <<ex.what()<<endl;
+                break;
+            }
+        }
+    });
 }
 
 void http_server::listen(const char *addr, int port) {

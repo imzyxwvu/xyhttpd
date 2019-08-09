@@ -3,9 +3,9 @@
 #include <iostream>
 #include "xyfcgi.h"
 
-bool fcgi_message::decoder::decode(const shared_ptr<streambuffer> &stb) {
-    if(stb->size() >= 8) {
-        unsigned char *buf = (unsigned char *)stb->data();
+bool fcgi_message::decoder::decode(stream_buffer &stb) {
+    if(stb.size() >= 8) {
+        unsigned char *buf = (unsigned char *)stb.data();
         unsigned char msgType = buf[1];
         unsigned short requestId = (buf[2] << 8) | buf[3];
         unsigned short length = (buf[4] << 8) | buf[5];
@@ -13,18 +13,14 @@ bool fcgi_message::decoder::decode(const shared_ptr<streambuffer> &stb) {
         if(buf[0] != 1)
             throw runtime_error("FastCGI version error");
         size_t expectedLength = 8 + length + paddingLen;
-        if(stb->size() >= expectedLength) {
+        if(stb.size() >= expectedLength) {
             _msg = make_shared<fcgi_message>(
                     (message_type)msgType, requestId, (char *)buf + 8, length);
-            stb->pull(expectedLength);
+            stb.pull(expectedLength);
             return true;
         }
     }
     return false;
-}
-
-shared_ptr<message> fcgi_message::decoder::msg() {
-    return _msg;
 }
 
 fcgi_message::decoder::~decoder() {
@@ -72,7 +68,7 @@ shared_ptr<fcgi_message> fcgi_message::make_dummy(fcgi_message::message_type t) 
 }
 
 fcgi_connection::fcgi_connection(const shared_ptr<stream> &strm, int roleId)
-	: _strm(strm), _envready(false), _buffer(make_shared<streambuffer>()) {
+	: _strm(strm), _envready(false) {
     unsigned char requestBegin[8] = { 0, (unsigned char)roleId, 0, 0, 0, 0, 0, 0};
     _strm->write(make_shared<fcgi_message>(
             fcgi_message::message_type::FCGI_BEGIN_REQUEST, 0, (char *)requestBegin, 8));
@@ -135,7 +131,7 @@ shared_ptr<message> fcgi_connection::read(shared_ptr<decoder> decoder) {
         auto msg = _strm->read<fcgi_message>(make_shared<fcgi_message::decoder>());
         switch(msg->msgtype()) {
             case fcgi_message::message_type::FCGI_STDOUT:
-                _buffer->append(msg->data(), msg->length());
+                _buffer.append(msg->data(), msg->length());
                 try {
                     if(decoder->decode(_buffer))
                         return decoder->msg();
@@ -168,7 +164,7 @@ shared_ptr<fcgi_connection> tcp_fcgi_provider::get_connection()
 unix_fcgi_provider::unix_fcgi_provider(const string &p)
     : _path(make_shared<string>(p)) {}
 
-unix_fcgi_provider::unix_fcgi_provider(shared_ptr<string> p)
+unix_fcgi_provider::unix_fcgi_provider(const shared_ptr<string> &p)
     : _path(p) {}
 
 shared_ptr<fcgi_connection> unix_fcgi_provider::get_connection()

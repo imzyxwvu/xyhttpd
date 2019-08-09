@@ -20,9 +20,6 @@ public:
     fcgi_message(message_type t, int requestId, const char *data, int len);
     ~fcgi_message();
 
-    inline int type() const {
-        return XY_MESSAGE_FCGI;
-    }
     inline message_type msgtype() const {
         return _type;
     }
@@ -42,14 +39,8 @@ public:
     class decoder : public ::decoder {
     public:
         decoder() = default;
-        virtual bool decode(const shared_ptr<streambuffer> &stb);
-        virtual shared_ptr<message> msg();
+        virtual bool decode(stream_buffer &stb);
         virtual ~decoder();
-    private:
-        shared_ptr<fcgi_message> _msg;
-
-        decoder(const decoder &) = delete;
-        decoder &operator=(const decoder &) = delete;
     };
 private:
     message_type _type;
@@ -79,7 +70,7 @@ private:
     unordered_map<string, shared_ptr<string>> _env;
     shared_ptr<stream> _strm;
     bool _envready;
-    shared_ptr<streambuffer> _buffer;
+    stream_buffer _buffer;
 };
 
 class fcgi_provider { 
@@ -100,7 +91,7 @@ class unix_fcgi_provider : public fcgi_provider {
 public:
     virtual shared_ptr<fcgi_connection> get_connection();
     unix_fcgi_provider(const string &path);
-    unix_fcgi_provider(shared_ptr<string> path);
+    unix_fcgi_provider(const shared_ptr<string> &path);
     inline shared_ptr<string> path() { return _path; }
 private:
     shared_ptr<string> _path;

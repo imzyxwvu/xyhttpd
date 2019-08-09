@@ -21,6 +21,13 @@ void http_service_chain::route(const string &r, shared_ptr<http_service> svc) {
     _svcs.push_back(make_shared<regex_route>(r, svc));
 }
 
+shared_ptr<http_service_chain> http_service_chain::build(
+        const function<void(http_service_chain *)> &builder) {
+    auto chain = make_shared<http_service_chain>();
+    builder(chain.get());
+    return chain;
+}
+
 local_file_service::local_file_service(const string &docroot)
     : _docroot(nullptr) {
         set_document_root(docroot);
@@ -35,7 +42,7 @@ void local_file_service::set_document_root(const string &docroot) {
     }
 }
 
-void local_file_service::add_defdoc_name(const string &defdoc) {
+void local_file_service::add_default_name(const string &defdoc) {
     _defdocs.push_back(defdoc);
 }
 
@@ -133,11 +140,41 @@ void local_file_service::serve(http_trx &tx) {
 logger_service::logger_service(ostream &os) : _os(os) {}
 
 void logger_service::serve(http_trx &tx) {
-    _os<<"["<<timelabel()<<fmt(" %s] %s %s%s",
-            tx->connection->peername()->c_str(),
-            tx->request->method_name(),
-            tx->request->header("host")->c_str(),
-            tx->request->resource()->c_str())<<endl;
+    if((*tx->request->resource())[0] == '/') {
+        _os<<"["<<timelabel()<<fmt(" %s] %s %s%s",
+                                   tx->connection->peername()->c_str(),
+                                   tx->request->method_name(),
+                                   tx->request->header("host")->c_str(),
+                                   tx->request->resource()->c_str())<<endl;
+    } else {
+        _os<<"["<<timelabel()<<fmt(" %s] %s %s",
+                                   tx->connection->peername()->c_str(),
+                                   tx->request->method_name(),
+                                   tx->request->resource()->c_str())<<endl;
+    }
+}
+
+basic_authenticator::basic_authenticator(
+        const string &realm, const function<bool(const string &, const string&)> &authf)
+: _realm(realm), _authf(authf) {}
+
+void basic_authenticator::serve(http_trx &tx) {
+    auto authorization = tx->request->header("authorization");
+    if(authorization && memcmp(authorization->data(), "Basic ", 6) == 0) {
+        string authData = base64_decode(authorization->substr(6));
+        int sepPos = authData.find(':');
+        if(sepPos != -1) {
+            string userName = authData.substr(0, authData.find(':'));
+            string password = authData.substr(authData.find(':') + 1);
+            if(_authf(userName, password)) {
+                tx->request->delete_header("authorization");
+                return;
+            }
+        }
+    }
+    auto resp = tx->get_response(401);
+    resp->set_header("WWW-Authenticate", fmt("Basic realm=\"%s\"", _realm.c_str()));
+    tx->finish();
 }
 
 tls_filter_service::tls_filter_service(int code) : _code(code) {}
@@ -267,7 +304,6 @@ void plain_data_service::serve(http_trx &tx) {
     auto resp = tx->get_response(200);
     resp->set_header("Content-Type", _ctype);
     resp->set_header("ETag", _etag);
-    tx->declare_length(_data.length());
     if(tx->request->method() != HEAD)
         tx->write(_data);
     tx->finish();
@@ -288,6 +324,37 @@ void regex_route::serve(http_trx &tx) {
 lambda_service::lambda_service(const function<void(http_trx &)> &func)
 : _func(func) {}
 
+lambda_service::lambda_service(const function<void(shared_ptr<websocket>)> &func)
+: _ws_func(func) {}
+
 void lambda_service::serve(http_trx &tx) {
-    _func(tx);
+    if(_ws_func && tx->request->header("sec-websocket-key")) {
+        auto ws = tx->accept_websocket();
+        if (!ws) {
+            tx->display_error(500);
+            return;
+        }
+        _ws_func(move(ws));
+    }
+    else if(_func)
+        _func(tx);
+}
+
+void connect_proxy::serve(http_trx &tx) {
+    if(tx->request->method() == CONNECT) {
+        int portBase = tx->request->path()->find(':');
+        if(portBase == -1) {
+            tx->display_error(403);
+            return;
+        }
+        string hostName = tx->request->path()->substr(0, portBase);
+        string port = tx->request->path()->substr(portBase + 1);
+        auto endpoint = make_shared<ip_endpoint>(hostName, atoi(port.c_str()));
+        auto remote = make_shared<tcp_stream>();
+        remote->connect(endpoint);
+        auto client = tx->upgrade(false);
+        client->write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        client->pipe(remote);
+        remote->pipe(client);
+    }
 }

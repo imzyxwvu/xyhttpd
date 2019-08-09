@@ -56,7 +56,7 @@ int http_response::serialize_size() {
     for(auto it = _headers.begin(); it != _headers.end(); it++)
         if(it->second)
             size += 4 + it->first.size() + it->second->size();
-    for(auto it = _cookies.begin(); it != _cookies.end(); it++)
+    for(auto it = cookies.begin(); it != cookies.end(); it++)
         size += 14 + (*it)->size();
     return size + 2;
 }
@@ -66,26 +66,21 @@ void http_response::serialize(char *buf) {
     for(auto it = _headers.begin(); it != _headers.end(); it++)
         buf += sprintf(buf, "%s: %s\r\n",
             it->first.c_str(), it->second->c_str());
-    for(auto it = _cookies.begin(); it != _cookies.end(); it++)
+    for(auto it = cookies.begin(); it != cookies.end(); it++)
         buf += sprintf(buf, "Set-Cookie: %s\r\n", (*it)->c_str());
     memcpy(buf, "\r\n", 2);
 }
 
-int http_response::type() const {
-    return XY_MESSAGE_RESP;
-}
-
 void http_response::set_code(int newcode) {
-    if(newcode > 599 || newcode < 100) {
-        throw runtime_error("invalid HTTP response code");
-    }
+    if(newcode > 599 || newcode < 100)
+        throw RTERR("invalid HTTP response code - %d", newcode);
     _code = newcode;
 }
 
 void http_response::set_header(const string &key, shared_ptr<string> val) {
     if(!val) return;
     if(key == "Set-Cookie") {
-        _cookies.push_back(val);
+        cookies.push_back(val);
     } else if(key == "Status") {
         _code = atoi(val->c_str());
     } else {
@@ -105,15 +100,15 @@ http_response::~http_response() {}
 
 http_response::decoder::decoder() {}
 
-bool http_response::decoder::decode(const shared_ptr<streambuffer> &stb) {
+bool http_response::decoder::decode(stream_buffer &stb) {
     shared_ptr<http_response> resp;
-    const char *chunk = stb->data();
+    const char *chunk = stb.data();
     int i = 0, currentExpect = 0, currentBase = 0;
     int verbOrKeyLength;
     char headerKey[32];
-    if(stb->size() > 0x10000)
+    if(stb.size() > 0x10000)
         throw runtime_error("request too long");
-    while(i < stb->size()) {
+    while(i < stb.size()) {
         switch(currentExpect) {
             case 0: // expect HTTP version - HTTP/1.
                 if(chunk[i] == '.') {
@@ -212,12 +207,8 @@ bool http_response::decoder::decode(const shared_ptr<streambuffer> &stb) {
     return false;
     entire_request_decoded:
     _msg = resp;
-    stb->pull(i + 1);
+    stb.pull(i + 1);
     return true;
-}
-
-shared_ptr<message> http_response::decoder::msg() {
-    return _msg;
 }
 
 http_response::decoder::~decoder() {}
@@ -226,25 +217,22 @@ http_transfer_decoder::http_transfer_decoder(shared_ptr<string> transferEnc) {
     _chunked = transferEnc && transferEnc->find("chunked") != -1;
 }
 
-bool http_transfer_decoder::decode(const shared_ptr<streambuffer> &stb) {
+bool http_transfer_decoder::decode(stream_buffer &stb) {
     if(_chunked) {
-        if(stb->size() > 3) {
+        if(stb.size() > 3) {
             char *end;
-            int len = strtol(stb->data(), &end, 16);
-            int chunkSize = end - stb->data();
+            int len = strtol(stb.data(), &end, 16);
+            int chunkSize = end - stb.data();
             if(!(chunkSize > 0 && end[0] == '\r' && end[1] == '\n'))
                 throw runtime_error("bad chunked protocol");
             chunkSize += len + 4;
-            if(stb->size() < chunkSize) return false;
-            if(buffer) free(buffer);
+            if(stb.size() < chunkSize) return false;
             nbyte = len;
-            if(len == 0) {
-                buffer = nullptr;
-                return true;
-            }
-            buffer = (char *)malloc(len);
-            memcpy(buffer, end + 2, len);
-            stb->pull(chunkSize);
+            if(nbyte == 0) return true;
+            char *buffer = (char *)malloc(nbyte);
+            memcpy(buffer, end + 2, nbyte);
+            _msg = make_shared<string_message>(buffer, nbyte);
+            stb.pull(chunkSize);
             return true;
         }
     }

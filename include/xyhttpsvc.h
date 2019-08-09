@@ -26,18 +26,20 @@ public:
     inline int size() const {
         return _svcs.size();
     }
+    static shared_ptr<http_service_chain>
+        build(const function<void(http_service_chain *)> &builder);
 private:
     vector<shared_ptr<http_service>> _svcs;
 };
 
 class local_file_service : public http_service {
 public:
-    local_file_service(const string &docroot);
+    explicit local_file_service(const string &docroot);
     inline shared_ptr<string> document_root() {
         return _docroot;
     }
     void set_document_root(const string &docroot);
-    void add_defdoc_name(const string &defdoc);
+    void add_default_name(const string &defdoc);
     void register_mimetype(const string &ext, const string &type);
     void register_mimetype(const string &ext, shared_ptr<string> type);
     void register_fcgi(const string &ext, shared_ptr<fcgi_provider> provider);
@@ -45,16 +47,26 @@ public:
 private:
     shared_ptr<string> _docroot;
     vector<string> _defdocs;
-    map<string, shared_ptr<string>> _mimetypes;
-    map<string, shared_ptr<fcgi_provider>> _fcgi_providers;
+    unordered_map<string, shared_ptr<string>> _mimetypes;
+    unordered_map<string, shared_ptr<fcgi_provider>> _fcgi_providers;
 };
 
 class logger_service : public http_service {
 public:
-    logger_service(ostream &os);
+    explicit logger_service(ostream &os);
     virtual void serve(http_trx &tx);
 private:
     ostream &_os;
+};
+
+class basic_authenticator : public http_service {
+public:
+    basic_authenticator(const string &realm,
+                        const function<bool(const string &, const string&)> &authf);
+    virtual void serve(http_trx &tx);
+private:
+    string _realm;
+    function<bool(const string &, const string&)> _authf;
 };
 
 class tls_filter_service : public http_service {
@@ -75,7 +87,7 @@ public:
     virtual void serve(http_trx &tx);
 private:
     shared_ptr<http_service> _default;
-    map<string, shared_ptr<http_service>> _svcmap;
+    unordered_map<string, shared_ptr<http_service>> _svcmap;
 };
 
 class proxy_pass_service : public http_service {
@@ -120,9 +132,16 @@ private:
 class lambda_service : public http_service {
 public:
     lambda_service(const function<void(http_trx &)> &func);
+    lambda_service(const function<void(shared_ptr<websocket>)> &func);
     virtual void serve(http_trx &tx);
 private:
     function<void(http_trx &)> _func;
+    function<void(shared_ptr<websocket>)> _ws_func;
+};
+
+class connect_proxy : public http_service {
+public:
+    virtual void serve(http_trx &tx);
 };
 
 #endif

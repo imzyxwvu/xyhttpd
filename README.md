@@ -1,12 +1,13 @@
 # xyhttpd C++ Web IO 框架
 
-xyhttpd 是一套 C++ 非阻塞的 Web IO 框架，目前基于 libuv 实现，目标平台为 Linux、macOS 和 Windows（基础功能）。xyhttpd 的目的是为 C++ 网络服务开发提供便利，基于如下设计思想，xyhttpd 可以实现网络协议的高效实现与业务逻辑的自然描述：
+xyhttpd 是一套 C++ 非阻塞的 Web IO 框架，目前基于 libuv 实现，目标平台为 Linux、macOS 和 Windows（基础功能）。xyhttpd 的目的是为 C++ 网络服务开发提供便利，特色包括：
 
 * 大规模使用 shared_ptr 和 virtual：简化内存管理，并尽最大可能保证类的多态性，使框架具有极高的可扩展性
 * Fiber 驱动：可以在避免线程同步开销以及资源竞争的基础上，更加自然地描述业务逻辑
 * decoder 模式网络 IO 处理：实现协议的语法与语义分离，对通信报文的解析和封装将被封装到 decoder 和 message 类中，业务执行绪中的代码只需关注业务逻辑的处理
 * TLS 支持：提供 tcp_stream 和 tls_stream，tls_stream 对象初始化完成后可直接作 tcp_stream 对象使用，业务代码无需关注过多 TLS 相关的底层细节
-* 多种现成 HTTP 功能： 静态文件处理、默认页面、反向代理、FastCGI、HTTPS等
+* 提供多种 HTTP 功能的支持： 静态文件处理、断点续传、默认页面、反向代理、正向隧道代理、FastCGI、HTTPS、GZip压缩、Basic验证等
+* 提供 WebSocket 支持：可用于开发高效的 WebSocket 服务端，且提供 permessage-deflate 压缩传输支持
 
 ## Build
 

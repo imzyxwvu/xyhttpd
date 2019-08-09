@@ -6,52 +6,26 @@
 
 using namespace std;
 
-#define XY_MESSAGE_REQUEST 1
-#define XY_MESSAGE_STRING  2
-#define XY_MESSAGE_CHUNK   3
-#define XY_MESSAGE_WSFRAME 4
-#define XY_MESSAGE_FCGI    5
-#define XY_MESSAGE_RESP    6
+#define XY_PAGESIZE        8192
 
 class message {
 public:
-    virtual int type() const = 0;
     virtual ~message() = 0;
 
     virtual int serialize_size() = 0;
     virtual void serialize(char *buf);
 };
 
-class streambuffer {
-public:
-    streambuffer();
-    void pull(int nbytes);
-    char *prepare(int nbytes);
-    void enlarge(int nbytes);
-    void append(const void *buffer, int nbytes);
-    char *detach();
-    inline int size() const { return _size; }
-    inline char *data() const { return (char *)_data; };
-    virtual ~streambuffer();
-private:
-    char *_data;
-    int _size;
-
-    streambuffer(const streambuffer &);
-    streambuffer &operator=(const streambuffer &);
-};
-
-class decoder {
-public:
-    virtual bool decode(const shared_ptr<streambuffer> &stb) = 0;
-    virtual shared_ptr<message> msg() = 0;
-    virtual ~decoder() = 0;
-};
 
 std::string timelabel();
-std::string fmt(const char * const f, ...);
+std::string fmt(const char * f, ...);
 std::string base64_encode(unsigned char const* , unsigned int len);
 std::string base64_decode(std::string const& s);
+template<typename T> inline T *mem_alloc() {
+    T* p = (T*)malloc(sizeof(T));
+    if(NULL == p) throw std::bad_alloc();
+    return p;
+}
 
 class extended_runtime_error : public runtime_error {
 public:

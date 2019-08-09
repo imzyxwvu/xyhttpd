@@ -22,6 +22,7 @@ public:
     http_request();
     inline http_method method() const { return _meth; };
     inline shared_ptr<string> resource() const { return _resource; }
+    void set_resource(shared_ptr<string> res);
     inline shared_ptr<string> path() const { return _path; }
     inline shared_ptr<string> query() const { return _query; }
     inline shared_ptr<string> header(const string &key) {
@@ -37,7 +38,6 @@ public:
     }
     void delete_header(const string &key);
     const char *method_name() const;
-    virtual int type() const;
     virtual ~http_request();
 
     virtual int serialize_size();
@@ -49,14 +49,8 @@ public:
     class decoder : public ::decoder {
     public:
         decoder();
-        virtual bool decode(const shared_ptr<streambuffer> &stb);
-        virtual shared_ptr<message> msg();
+        virtual bool decode(stream_buffer &stb);
         virtual ~decoder();
-    private:
-        shared_ptr<http_request> _msg;
-
-        decoder(const decoder &);
-        decoder &operator=(const decoder &);
     };
 private:
     http_method _meth;
@@ -72,6 +66,8 @@ private:
 
 class http_response : public message {
 public:
+    vector<shared_ptr<string>> cookies;
+
     inline shared_ptr<string> header(const string &key) {
         auto it = _headers.find(key);
         return it == _headers.end() ? nullptr : it->second;
@@ -89,25 +85,17 @@ public:
     virtual void serialize(char *buf);
     
     explicit http_response(int code);
-    virtual int type() const;
     virtual ~http_response();
 
     class decoder : public ::decoder {
     public:
         decoder();
-        virtual bool decode(const shared_ptr<streambuffer> &stb);
-        virtual shared_ptr<message> msg();
+        virtual bool decode(stream_buffer &stb);
         virtual ~decoder();
-    private:
-        shared_ptr<http_response> _msg;
-
-        decoder(const decoder &);
-        decoder &operator=(const decoder &);
     };
 private:
     int _code;
     unordered_map<string, shared_ptr<string>> _headers;
-    vector<shared_ptr<string>> _cookies;
 
     http_response &operator=(const http_response &);
 };
@@ -115,46 +103,46 @@ private:
 class http_transfer_decoder : public string_decoder {
 public:
     http_transfer_decoder(shared_ptr<string> transferEnc);
-    virtual bool decode(const shared_ptr<streambuffer> &stb);
+    virtual bool decode(stream_buffer &stb);
 private:
     bool _chunked;
 };
 
-class http_connection;
-
 class http_transaction {
 public:
-    http_transaction(shared_ptr<http_connection> conn,
+    http_transaction(shared_ptr<class http_connection> conn,
                      shared_ptr<http_request> req);
+    ~http_transaction();
 
     void serve_file(const string &filename);
+    void serve_file(const string &filename, struct stat &info);
     void forward_to(const string &hostname, int port);
     void forward_to(shared_ptr<ip_endpoint> ep);
     void forward_to(shared_ptr<fcgi_connection> conn);
     void redirect_to(const string &dest);
     void display_error(int code);
-    void declare_length(int len);
     shared_ptr<class websocket> accept_websocket();
     shared_ptr<http_response> get_response();
     shared_ptr<http_response> get_response(int code);
-    shared_ptr<stream> upgrade();
+    shared_ptr<stream> upgrade(bool flush_resp = true);
     void write(const char *buf, int len);
+    void transfer(const char *buf, int len);
     void write(const string &buf);
     void finish();
 
     inline bool header_sent() const { return _headerSent; }
     const shared_ptr<http_request> request;
-    const shared_ptr<http_connection> connection;
+    const shared_ptr<class http_connection> connection;
     static const string SERVER_VERSION;
     static const string WEBSOCKET_MAGIC;
     shared_ptr<string> postdata;
 private:
     void flush_response();
-    void write_chunk(const char *buf, int len);
     bool _headerSent, _finished;
-    enum transfer_mode { UNDECIDED, SIMPLE, GZIP, CHUNKED, UPGRADE };
+    enum transfer_mode { UNDECIDED, SIMPLE, CHUNKED, UPGRADE, HEADONLY };
     transfer_mode _transfer_mode;
-    streambuffer _tx_buffer;
+    struct z_stream_s *_gzip;
+    stream_buffer _tx_buffer;
     shared_ptr<http_response> _response;
 };
 
@@ -191,19 +179,19 @@ private:
 class http_server {
 public:
     shared_ptr<http_service> service;
-    http_server(shared_ptr<http_service> svc);
-    http_server(http_service *svc);
+    explicit http_server(shared_ptr<http_service> svc);
+    explicit http_server(http_service *svc);
     virtual ~http_server();
 
     virtual void start_thread(shared_ptr<stream> strm, shared_ptr<string> pname);
 
     void listen(const char *addr, int port);
     virtual void do_listen(int backlog);
+
+    http_server(const http_server &) = delete;
+    http_server &operator=(const http_server &) = delete;
 protected:
     uv_tcp_t *_server;
-
-    http_server(const http_server &);
-    http_server &operator=(const http_server &);
 };
 
 #endif

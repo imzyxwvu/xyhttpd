@@ -15,7 +15,7 @@ const string http_transaction::WEBSOCKET_MAGIC("258EAFA5-E914-47DA-95CA-C5AB0DC8
 http_transaction::http_transaction(
     shared_ptr<http_connection> conn, shared_ptr<http_request> req) :
     connection(move(conn)), request(move(req)), _headerSent(false),
-    _finished(false), _transfer_mode(UNDECIDED) {
+    _finished(false), _transfer_mode(UNDECIDED), _gzip(nullptr) {
     if(auto ctlen = request->header("content-length")) {
         int len = atoi(ctlen->c_str());
         if(len > 0x800000) {
@@ -31,9 +31,19 @@ http_transaction::http_transaction(
             bufpos += str->serialize_size();
         }
         postdata = make_shared<string>(buf, len);
-        delete buf;
+        delete[] buf;
     }
     _response = make_shared<http_response>(200);
+    if(request->method() == HEAD)
+        _transfer_mode = HEADONLY;
+}
+
+http_transaction::~http_transaction() {
+    if(_gzip) {
+        deflateEnd(_gzip);
+        delete _gzip;
+        _gzip = nullptr;
+    }
 }
 
 void http_transaction::forward_to(const string &host, int port) {
@@ -51,16 +61,26 @@ void http_transaction::forward_to(shared_ptr<ip_endpoint> ep) {
     if(postdata) strm->write(*postdata);
     _response->set_code(100);
     auto respdec = make_shared<http_response::decoder>();
-    while(_response->code() == 100)
+    while(_response->code() == 100) {
         _response = strm->read<http_response>(respdec);
+        if(!_response) {
+            display_error(502);
+            return;
+        }
+    }
     if(auto contentLen = _response->header("Content-Length")) {
         int len = atoi(contentLen->c_str());
-        declare_length(len);
         auto dec = make_shared<rest_decoder>(len);
         while(dec->more()) {
             auto msg = strm->read<string_message>(dec);
             write(msg->data(), msg->serialize_size());
         }
+    }
+    else if (_response->code() == 101 && _response->header("Upgrade")) {
+        auto client = upgrade();
+        client->pipe(strm);
+        strm->pipe(client);
+        return;
     }
     else if (_response->code() != 304) {
         auto dec = make_shared<http_transfer_decoder>(
@@ -132,22 +152,53 @@ void http_transaction::serve_file(const string &filename) {
         finish();
         return;
     }
-    auto resp = get_response(200);
-    resp->set_header("Last-Modified", modtime);
-    declare_length(info.st_size);
+    _response->set_code(200);
+    _response->set_header("Last-Modified", modtime);
     if(request->method() == HEAD) {
+        _response->set_header("Content-Length", to_string(info.st_size));
         finish();
         return;
+    }
+    serve_file(filename, info);
+}
+
+void http_transaction::serve_file(const string &filename, struct stat &info) {
+    auto range = request->header("range");
+    size_t seekTo = 0, rest = info.st_size;
+    if(range && memcmp(range->data(), "bytes=", 6) == 0) {
+        string byteRange = range->substr(6);
+        int sep = byteRange.find('-');
+        if(sep > 0) {
+            seekTo = stol(byteRange.substr(0, sep));
+            int endPos = info.st_size - 1;
+            if(sep < byteRange.size() - 1)
+                endPos = stol(byteRange.substr(sep + 1));
+            if(!(endPos < info.st_size && seekTo <= endPos)) {
+                display_error(416);
+                return;
+            }
+            rest = endPos - seekTo + 1;
+        }
     }
     int fd = open(filename.c_str(), O_RDONLY);
     if(fd < 0) {
         display_error(403);
         return;
     }
-    char *buf = new char[info.st_blksize];
-    size_t rest = info.st_size;
+    if(rest < info.st_size) {
+        _response->set_code(206);
+        _response->set_header("Content-Range",
+                         fmt("bytes %d-%d/%d", seekTo, seekTo + rest - 1, info.st_size));
+        if(lseek(fd, seekTo, SEEK_SET) == -1) {
+            close(fd);
+            display_error(416);
+            return;
+        }
+    }
+    size_t chunkSize = max<size_t>(info.st_blksize, 8192);
+    char *buf = new char[chunkSize];
     while(rest > 0) {
-        size_t avail = read(fd, buf, info.st_blksize);
+        size_t avail = read(fd, buf, min<size_t>(chunkSize, rest));
         if(avail > 0) {
             this->write(buf, avail);
             rest -= avail;
@@ -161,9 +212,18 @@ void http_transaction::serve_file(const string &filename) {
     finish();
 }
 
-shared_ptr<stream> http_transaction::upgrade() {
+shared_ptr<stream> http_transaction::upgrade(bool flush_resp) {
+    if(_gzip) {
+        deflateEnd(_gzip);
+        delete _gzip;
+        _gzip = nullptr;
+    }
     _transfer_mode = UPGRADE;
-    flush_response();
+    if(flush_resp) {
+        flush_response();
+    } else {
+        _headerSent = true;
+    }
     _finished = true;
     return connection->upgrade();
 }
@@ -181,10 +241,15 @@ shared_ptr<websocket> http_transaction::accept_websocket() {
     unsigned char shabuf[SHA_DIGEST_LENGTH];
     SHA1((unsigned char *)wsaccept.data(), wsaccept.size(), shabuf);
     auto resp = get_response(101);
+    bool permsgDeflate;
     resp->set_header("Upgrade", "websocket");
     resp->set_header("Sec-WebSocket-Accept",
             base64_encode(shabuf, SHA_DIGEST_LENGTH));
-    return make_shared<websocket>(upgrade());
+    permsgDeflate = request->header_include("sec-websocket-extensions", "permessage-deflate")
+            && !request->header_include("sec-websocket-extensions", "server_max_window_bits");
+    if(permsgDeflate)
+        resp->set_header("Sec-WebSocket-Extensions", "permessage-deflate");
+    return make_shared<websocket>(upgrade(), permsgDeflate);
 }
 
 void http_transaction::redirect_to(const string &dest) {
@@ -219,6 +284,7 @@ void http_transaction::flush_response() {
     if(_transfer_mode == UPGRADE) {
         _response->set_header("Connection", "upgrade");
     } else if(_transfer_mode == CHUNKED) {
+        _response->delete_header("Content-Length");
         _response->set_header("Transfer-Encoding", "chunked");
     } else {
         _response->set_header("Connection",
@@ -228,54 +294,67 @@ void http_transaction::flush_response() {
     _headerSent = true;
 }
 
-void http_transaction::declare_length(int len) {
-    if(_transfer_mode == UNDECIDED && len < 0x80000 &&
-            len > 0x200 && request->method() != HEAD) {
-        if(request->header_include("accept-encoding", "deflate")) {
-            _response->set_header("Content-Encoding", "deflate");
-            _transfer_mode = GZIP;
+void http_transaction::write(const char *buf, int len) {
+    if(_finished)
+        throw RTERR("writing to finished transaction");
+    if(_gzip) {
+        Bytef outBuf[0x4000];
+        _gzip->next_in = (Bytef *)buf;
+        _gzip->avail_in = len;
+        while(_gzip->avail_in > 0) {
+            _gzip->next_out = outBuf;
+            _gzip->avail_out = sizeof(outBuf);
+            int ret = deflate(_gzip, 0);
+            if(ret != Z_OK)
+                throw runtime_error("GZIP compression failure");
+            if(sizeof(outBuf) - _gzip->avail_out > 0)
+                transfer((char *)&outBuf, sizeof(outBuf) - _gzip->avail_out);
         }
-    }
-    if(_transfer_mode == UNDECIDED) {
-        _transfer_mode = SIMPLE;
-        _response->set_header("Content-Length", to_string(len));
+    } else {
+        if(len == 0) return;
+        transfer(buf, len);
+        if(_transfer_mode == UNDECIDED && _tx_buffer.size() > 0x100 &&
+            request->header_include("accept-encoding", "gzip")) {
+            _gzip = new z_stream;
+            _gzip->zalloc = Z_NULL;
+            _gzip->zfree = Z_NULL;
+            _gzip->opaque = Z_NULL;
+            if(deflateInit2(_gzip, Z_BEST_COMPRESSION, Z_DEFLATED,
+                            MAX_WBITS + 16, MAX_MEM_LEVEL, Z_DEFAULT_STRATEGY) != Z_OK) {
+                delete _gzip;
+                _gzip = nullptr;
+                return;
+            }
+            _response->set_header("Content-Encoding", "gzip");
+            len = _tx_buffer.size();
+            buf = _tx_buffer.detach();
+            write(buf, len);
+            free((void *)buf);
+        }
     }
 }
 
-void http_transaction::write(const char *buf, int len) {
-    if(_finished)
-        throw RTERR("HTTP transaction already finished");
-    if(len == 0) return;
+void http_transaction::transfer(const char *buf, int len) {
     switch(_transfer_mode) {
         case UNDECIDED:
             _tx_buffer.append(buf, len);
-            if(_tx_buffer.size() > 0x80000) {
+            if(_tx_buffer.size() > 0x20000) {
                 _transfer_mode = CHUNKED;
                 flush_response();
-                write_chunk(_tx_buffer.data(), _tx_buffer.size());
+                transfer(_tx_buffer.data(), _tx_buffer.size());
                 _tx_buffer.pull(_tx_buffer.size());
             }
             break;
-        case GZIP:
-            _tx_buffer.append(buf, len);
-            break;
-        case SIMPLE:
-            if(!_headerSent) flush_response();
+        case CHUNKED: {
+            char chunkHdr[16];
+            int hdrLen = sprintf(chunkHdr, "%x\r\n", len);
+            connection->_strm->write(chunkHdr, hdrLen);
             connection->_strm->write(buf, len);
+            connection->_strm->write("\r\n", 2);
             break;
-        case CHUNKED:
-            write_chunk(buf, len);
-            break;
+        }
+        default: break;
     }
-}
-
-void http_transaction::write_chunk(const char *buf, int len) {
-    char chunkHdr[16];
-    int hdrLen = sprintf(chunkHdr, "%x\r\n", len);
-    connection->_strm->write(chunkHdr, hdrLen);
-    connection->_strm->write(buf, len);
-    connection->_strm->write("\r\n", 2);
-
 }
 
 void http_transaction::write(const string &buf) {
@@ -283,45 +362,34 @@ void http_transaction::write(const string &buf) {
 }
 
 void http_transaction::finish() {
-    if(_transfer_mode == SIMPLE || _response->code() == 304)
+    if(_response->code() == 304 || _transfer_mode == HEADONLY)
         _finished = true;
     if(_finished) {
         if(!_headerSent) flush_response();
         return;
     }
-    if(_transfer_mode == UNDECIDED) declare_length(_tx_buffer.size());
-    switch(_transfer_mode) {
-        case GZIP: {
-            unsigned long bound = compressBound(_tx_buffer.size());
-            char *buf = new char[bound];
-            if(compress((Bytef *)buf, &bound,
-                    (Bytef *)_tx_buffer.data(), _tx_buffer.size()) == Z_OK
-                    && bound < _tx_buffer.size()) {
-                _tx_buffer.pull(_tx_buffer.size());
-                _response->set_header("Content-Length", to_string(bound));
-                flush_response();
-                connection->_strm->write(buf, bound);
-                delete[] buf;
-            } else {
-                delete[] buf;
-                _response->set_header("Content-Length", to_string(_tx_buffer.size()));
-                _response->delete_header("Content-Encoding");
-                flush_response();
-                connection->_strm->write(_tx_buffer.data(), _tx_buffer.size());
-                _tx_buffer.pull(_tx_buffer.size());
-            }
-            break;
+    if(_gzip) {
+        Bytef outBuf[16384];
+        while(true) {
+            _gzip->next_out = outBuf;
+            _gzip->avail_out = sizeof(outBuf);
+            int ret = deflate(_gzip, Z_FINISH);
+            if(ret != Z_OK && ret != Z_STREAM_END)
+                throw runtime_error("GZIP compression failure");
+            transfer((char *)&outBuf, sizeof(outBuf) - _gzip->avail_out);
+            if(ret == Z_STREAM_END) break;
         }
-        case CHUNKED:
-            connection->_strm->write("0\r\n\r\n", 5);
-            break;
-        case SIMPLE:
-            flush_response();
-            if(_tx_buffer.size() > 0) {
-                connection->_strm->write(_tx_buffer.data(), _tx_buffer.size());
-                _tx_buffer.pull(_tx_buffer.size());
-            }
-            break;
     }
+    if(_transfer_mode == UNDECIDED) {
+        _transfer_mode = SIMPLE;
+        _response->set_header("Content-Length", to_string(_tx_buffer.size()));
+        flush_response();
+        if(_tx_buffer.size() > 0) {
+            connection->_strm->write(_tx_buffer.data(), _tx_buffer.size());
+            _tx_buffer.pull(_tx_buffer.size());
+        }
+    }
+    else if(_transfer_mode == CHUNKED)
+        connection->_strm->write("0\r\n\r\n", 5);
     _finished = true;
 }

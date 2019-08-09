@@ -1,10 +1,13 @@
 #include "xycommon.h"
 #include <cstring>
 #include <cstdarg>
+#include <ctime>
 #include <vector>
-#include <execinfo.h>
+#ifndef _WIN32
+# include <execinfo.h>
+#endif
 
-std::string fmt(const char * const f, ...) {
+std::string fmt(const char *f, ...) {
     va_list ap, ap2;
     va_start(ap, f);
     va_copy(ap2, ap);
@@ -26,8 +29,10 @@ std::string timelabel() {
 
 extended_runtime_error::extended_runtime_error
     (const char *fname, int lno, const string &wh) :
-    _filename(fname), _lineno(lno), runtime_error(wh) {
+    _filename(fname), _lineno(lno), runtime_error(wh), _depth(0) {
+#ifndef _WIN32
     _depth = backtrace(_btbuf, 20) - 1;
+#endif
 }
 
 const char *extended_runtime_error::filename() {
@@ -43,6 +48,18 @@ int extended_runtime_error::tracedepth() {
     return _depth;
 }
 
+#ifndef _WIN32
+
 char **extended_runtime_error::stacktrace() {
     return backtrace_symbols(_btbuf + 1, _depth);
 }
+
+#else
+
+char **extended_runtime_error::stacktrace() {
+    auto buf = (char **)malloc(sizeof(char *));
+    *buf = NULL;
+    return buf;
+}
+
+#endif

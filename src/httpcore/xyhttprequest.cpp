@@ -39,10 +39,6 @@ const char *http_request::method_name() const {
     }
 }
 
-int http_request::type() const {
-    return XY_MESSAGE_REQUEST;
-}
-
 int http_request::serialize_size() {
     int size = 12 + strlen(method_name()) + _resource->size();
     for(auto it = _headers.begin(); it != _headers.end(); it++)
@@ -63,15 +59,15 @@ http_request::~http_request() {}
 
 http_request::decoder::decoder() {}
 
-bool http_request::decoder::decode(const shared_ptr<streambuffer> &stb) {
+bool http_request::decoder::decode(stream_buffer &stb) {
     auto req = make_shared<http_request>();
-    const char *chunk = stb->data();
+    const char *chunk = stb.data();
     int i = 0, currentExpect = 0, currentBase;
     int verbOrKeyLength;
     char headerKey[32];
-    if(stb->size() > 0x10000)
+    if(stb.size() > 0x10000)
         throw runtime_error("request too long");
-    while(i < stb->size()) {
+    while(i < stb.size()) {
         switch(currentExpect) {
             case 0: // expect HTTP method
                 if(chunk[i] == ' ') {
@@ -90,7 +86,7 @@ bool http_request::decoder::decode(const shared_ptr<streambuffer> &stb) {
                     memcpy(method, chunk, verbOrKeyLength);
                     method[verbOrKeyLength] = 0;
                     req->set_method(method);
-                    req->_resource = make_shared<string>(CURRENT_VALUE);
+                    req->set_resource(make_shared<string>(CURRENT_VALUE));
                     currentBase = i + 1;
                     currentExpect = 2;
                 }
@@ -177,20 +173,20 @@ bool http_request::decoder::decode(const shared_ptr<streambuffer> &stb) {
     return false;
     entire_request_decoded:
     _msg = req;
-    stb->pull(i + 1);
+    stb.pull(i + 1);
     return true;
 }
 
-shared_ptr<message> http_request::decoder::msg() {
-    const char *origRes = _msg->resource()->c_str();
-    const char *queryBase = strchr(origRes, '?');
+void http_request::set_resource(shared_ptr<string> res) {
+    _resource = move(res);
+    const char *queryBase = strchr(_resource->c_str(), '?');
     if(queryBase) {
-        _msg->_path = make_shared<string>(origRes, queryBase - origRes);
-        _msg->_query = make_shared<string>(queryBase + 1);
+        _path = make_shared<string>(_resource->c_str(), queryBase - _resource->c_str());
+        _query = make_shared<string>(queryBase + 1);
     } else {
-        _msg->_path = _msg->resource();
+        _path = _resource;
+        _query.reset();
     }
-    return _msg;
 }
 
 void http_request::delete_header(const string &key) {

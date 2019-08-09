@@ -2,8 +2,9 @@
 #define XYHTTPD_STREAM_H
 
 #include <uv.h>
+#include <functional>
 
-#include "xycommon.h"
+#include "xybuffer.h"
 #include "xyfiber.h"
 
 #define IOERR(r) RTERR("I/O Error: %s", uv_strerror(r))
@@ -20,16 +21,29 @@ public:
         return _status;
     }
     const char *strerror();
-    const char *errname();
     virtual ~int_status();
 private:
     int _status;
 };
 
-class stream {
+class stream : public enable_shared_from_this<stream> {
 public:
-    shared_ptr<streambuffer> buffer;
-    shared_ptr<fiber> reading_fiber, writing_fiber;
+    class write_request {
+    public:
+        write_request();
+
+        union {
+            uv_write_t write_req;
+            uv_shutdown_t shutdown_req;
+            uv_connect_t connect_req;
+        };
+        shared_ptr<fiber> _fiber;
+    };
+
+    shared_ptr<fiber> reading_fiber;
+
+    class callbacks;
+    friend class callbacks;
 
     virtual void accept(uv_stream_t *);
     template<class T>
@@ -39,15 +53,24 @@ public:
     }
     virtual shared_ptr<message> read(const shared_ptr<decoder> &dec);
     virtual void write(const char *buf, int length);
+    virtual void pipe(const shared_ptr<stream> &sink);
     virtual bool has_tls();
     void write(const shared_ptr<message> &msg);
     void write(const string &str);
+    void shutdown();
+    void set_timeout(int timeout);
     virtual ~stream();
 protected:
+    shared_ptr<int_status> _do_read();
+    virtual void _commit_rx(char *base, int nread);
     uv_stream_t *handle;
+    uv_timer_t *_timeOuter;
+    int _timeout;
+    stream_buffer buffer;
+    shared_ptr<decoder> _decoder;
+    shared_ptr<stream> _pipe_src, _pipe_sink;
     stream();
 private:
-    uv_write_t _wreq;
     stream(const stream &);
 };
 
@@ -81,47 +104,23 @@ private:
 class unix_stream : public stream {
 public:
     unix_stream();
-    virtual void connect(const shared_ptr<string> path);
+    virtual void connect(const shared_ptr<string> &path);
 };
 
-class string_message : public message {
+class tcp_server {
 public:
-    string_message(const char *buf, int len);
-    explicit string_message(const string &str);
-    inline shared_ptr<string> str() {
-        return make_shared<string>(_str);
-    }
-    inline const char *data() { return _str.data(); }
-    virtual int type() const;
-    virtual ~string_message();
+    function<void(shared_ptr<tcp_stream>)> service_func;
 
-    virtual int serialize_size();
-    virtual void serialize(char *buf);
-private:
-    string _str;
-};
+    tcp_server(const char *addr, int port);
+    virtual ~tcp_server();
 
-class string_decoder : public decoder {
-public:
-    string_decoder();
-    virtual bool decode(const shared_ptr<streambuffer> &stb);
-    virtual shared_ptr<message> msg();
-    virtual ~string_decoder();
+    void serve(function<void(shared_ptr<tcp_stream>)> f);
+
+    tcp_server(const tcp_server &) = delete;
+    tcp_server &operator=(const tcp_server &) = delete;
 protected:
-    int nbyte;
-    char *buffer;
+    uv_tcp_t *_server;
 };
 
-class rest_decoder : public decoder {
-public:
-    rest_decoder(int rest);
-    virtual bool decode(const shared_ptr<streambuffer> &stb);
-    virtual shared_ptr<message> msg();
-    virtual ~rest_decoder();
-    inline bool more() { return nrest > 0; }
-private:
-    int nbyte, nrest;
-    char *buffer;
-};
 
 #endif

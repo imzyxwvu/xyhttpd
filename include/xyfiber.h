@@ -1,8 +1,13 @@
 #ifndef XYHTTPD_FIBER_H
 #define XYHTTPD_FIBER_H
 
-#include <ucontext.h>
-#include <stack>
+#ifdef _WIN32
+typedef void *fiber_context_t; // LPVOID
+#else
+# include <ucontext.h>
+typedef ucontext_t fiber_context_t;
+#endif
+#include <functional>
 #include <queue>
 
 #include "xycommon.h"
@@ -13,7 +18,8 @@ public:
 };
 
 class fiber {
-public:
+private:
+#ifndef _WIN32
     class stack_mem {
     public:
         explicit stack_mem(int _size);
@@ -26,8 +32,21 @@ public:
         size_t _size;
     };
 
-    shared_ptr<wakeup_event> event;
-    fiber(void (*func)(void *), void *data);
+    shared_ptr<stack_mem> _stack;
+    static queue<shared_ptr<stack_mem>> stack_pool;
+#endif
+
+public:
+    class preserve {
+    public:
+        explicit preserve(shared_ptr<fiber> &f);
+        ~preserve();
+    private:
+        shared_ptr<fiber> &_f;
+    };
+
+    fiber(const fiber &) = delete;
+    explicit fiber(function<void()>);
     template<class T>
     inline static shared_ptr<T> yield() {
         return dynamic_pointer_cast<T>(yield());
@@ -36,32 +55,25 @@ public:
     void resume();
     void raise(const string &ex);
     inline void resume(shared_ptr<wakeup_event> evt) {
-        event = move(evt);
+        _event = move(evt);
         resume();
     }
-    static shared_ptr<fiber> make(void (*func)(void *), void *data);
-    void invoke(void *data);
+    static shared_ptr<fiber> launch(function<void()>);
     inline static shared_ptr<fiber> current() {
-        return levels.top();
-    }
-    inline static bool in_fiber() {
-        return !levels.empty();
+        return _current;
     }
     ~fiber();
 private:
-    fiber(const fiber &) = delete;
-    static void wrapper(fiber *f, void *data);
-    ucontext_t context;
+    static void wrapper(fiber *f);
+    fiber_context_t context;
+    shared_ptr<wakeup_event> _event;
     bool _terminated;
-    void (*entry)(void *data);
-    shared_ptr<fiber> self;
-    shared_ptr<stack_mem> _stack;
+    function<void()> _entry;
+    shared_ptr<fiber> self, _prev;
     shared_ptr<runtime_error> _err;
-    static shared_ptr<fiber> _last_breathe;
-    static std::stack<shared_ptr<fiber>> levels;
-    static ucontext_t maincontext;
+    static shared_ptr<fiber> _current;
+    static fiber_context_t maincontext;
 
-    static queue<shared_ptr<stack_mem>> stack_pool;
     static int stack_pool_target;
 };
 

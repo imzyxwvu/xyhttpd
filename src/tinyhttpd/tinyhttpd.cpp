@@ -9,7 +9,7 @@
 
 class signal_watcher {
 public:
-    signal_watcher(int signo) {
+    explicit signal_watcher(int signo) {
         int r = uv_signal_init(uv_default_loop(), &sig);
         if(r < 0) throw IOERR(r);
         uv_signal_start(&sig, signal_cb, signo);
@@ -86,8 +86,8 @@ int main(int argc, char *argv[])
     char suffix[16];
     char backend[NAME_MAX];
     int opt;
-    tls_context ctx;
-    bool useTLS = false, daemonize = false;
+    shared_ptr<tls_context> ctx;
+    bool daemonize = false;
     shared_ptr<fcgi_provider> fcgiProvider;
     shared_ptr<http_server> server;
     local_file_svc->register_mimetype("html", "text/html");
@@ -115,14 +115,14 @@ int main(int argc, char *argv[])
                     printf("Duplicate -s.\n");
                     return EXIT_FAILURE;
                 }
+                ctx = make_shared<tls_context>();
                 portBase = strchr(optarg, ':');
                 if(portBase) {
                     *portBase = 0;
-                    ctx.use_certificate(optarg, portBase + 1);
+                    ctx->use_certificate(optarg, portBase + 1);
                 } else {
-                    ctx.use_certificate(optarg);
+                    ctx->use_certificate(optarg);
                 }
-                useTLS = true;
                 break;
             case 'f':
                 portBase = strchr(optarg, '=');
@@ -164,7 +164,7 @@ int main(int argc, char *argv[])
                 }
                 break;
             case 'd':
-                local_file_svc->add_defdoc_name(optarg);
+                local_file_svc->add_default_name(optarg);
                 break;
             case 'l':
                 logStream = new ofstream(optarg, ios_base::app | ios_base::out);
@@ -181,7 +181,7 @@ int main(int argc, char *argv[])
     if(daemonize) become_daemon();
     shared_ptr<http_service_chain> svcChain(new http_service_chain());
     try {
-        if(useTLS) svcChain->append<tls_filter_service>(302);
+        if(ctx) svcChain->append<tls_filter_service>(302);
         if(daemonize && !logStream)
             logStream = new ofstream(fmt("/tmp/tinyhttpd-%d-access.log", getpid()));
         if(logStream)
@@ -191,7 +191,7 @@ int main(int argc, char *argv[])
         svcChain->append(local_file_svc);
         if(proxy_svc->count() > 0)
             svcChain->append(proxy_svc);
-        if(useTLS)
+        if(ctx)
             server = make_shared<https_server>(ctx, svcChain);
         else
             server = make_shared<http_server>(svcChain);
