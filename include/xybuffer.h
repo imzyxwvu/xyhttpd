@@ -9,15 +9,13 @@ public:
     void pull(int nbytes);
     char *prepare(size_t nbytes);
     void commit(size_t nbytes);
-    void append(const shared_ptr<message> &msg);
+    void append(const P<message> &msg);
     void append(const void *p, int nbytes);
     char *detach();
     inline char operator[](int i) { return _data[i]; }
     inline size_t size() const { return _avail; }
     inline char *data() const { return (char *)_data; };
-    inline shared_ptr<string> to_string() const {
-        return make_shared<string>(_data, _avail);
-    }
+    inline chunk dump() const { return chunk(_data, _avail); }
     virtual ~stream_buffer();
 private:
     char *_data;
@@ -32,19 +30,17 @@ public:
     decoder() = default;
     decoder(const decoder &) = delete;
     virtual bool decode(stream_buffer &stb) = 0;
-    inline shared_ptr<message> msg() { return _msg; }
+    inline P<message> msg() { return _msg; }
     virtual ~decoder() = 0;
 protected:
-    shared_ptr<message> _msg;
+    P<message> _msg;
 };
 
 class string_message : public message {
 public:
     string_message(char *buf, size_t len);
-    explicit string_message(const string &str);
-    inline shared_ptr<string> str() {
-        return make_shared<string>(_buffer, _size);
-    }
+    explicit string_message(const std::string &str);
+    inline chunk str() { return chunk(_buffer, _size); }
     inline const char *data() { return _buffer; }
     virtual ~string_message();
 
@@ -57,21 +53,12 @@ private:
 
 class string_decoder : public decoder {
 public:
-    string_decoder();
+    explicit string_decoder(int bytesToRead = -1);
     virtual bool decode(stream_buffer &stb);
+    inline bool more() { return _restBytes != 0; }
     virtual ~string_decoder();
 protected:
-    int nbyte;
-};
-
-class rest_decoder : public string_decoder {
-public:
-    rest_decoder(int rest);
-    virtual bool decode(stream_buffer &stb);
-    inline bool more() { return nrest > 0; }
-    virtual ~rest_decoder();
-private:
-    int nrest;
+    int _nBytes, _restBytes;
 };
 
 #endif //XYHTTPD_XYBUFFER_H

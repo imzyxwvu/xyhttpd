@@ -2,13 +2,15 @@
 #include <cstring>
 #include <iostream>
 
+using namespace std;
+
 const char *int_status::strerror() {
     return uv_strerror(_status);
 }
 
 int_status::~int_status() {}
 
-stream::stream() : _timeout(30000) {
+stream::stream() : _timeout(15000) {
     _timeOuter = mem_alloc<uv_timer_t>();
     if(uv_timer_init(uv_default_loop(), _timeOuter) < 0) {
         free(_timeOuter);
@@ -42,10 +44,18 @@ public:
         buf->len = buf->base ? suggested_size : 0;
     }
 
+    static void on_read_timeout(uv_timer_t* handle) {
+        stream *self = (stream *)handle->data;
+        uv_timer_stop(handle);
+        self->reading_fiber->resume(int_status::make(UV_ETIMEDOUT));
+    }
+
     static void on_data(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         stream *self = (stream *)handle->data;
-        if(nread != 0)
+        if(nread != 0) {
+            uv_timer_stop(self->_timeOuter);
             self->_commit_rx(buf->base, nread);
+        }
     }
 
     static void pump_on_shutdown(uv_shutdown_t* req, int status) {
@@ -89,8 +99,6 @@ shared_ptr<message> stream::read(const shared_ptr<decoder> &decoder) {
     if(s->status() >= 0) {
         return decoder->msg();
     } else {
-        if(s->status() == UV_EOF)
-            return nullptr;
         throw IOERR(s->status());
     }
 }
@@ -105,7 +113,6 @@ static void stream_on_write(uv_write_t *req, int status)
 
 void stream::write(const char *chunk, int length)
 {
-    if(_pipe_src) throw runtime_error("stream is a sink");
     uv_buf_t buf;
     buf.base = (char *)chunk;
     buf.len = length;
@@ -128,7 +135,7 @@ void stream::write(const shared_ptr<message> &msg) {
     delete[] buf;
 }
 
-void stream::write(const string &str) {
+void stream::write(const chunk &str) {
     write(str.data(), str.size());
 }
 
@@ -140,12 +147,15 @@ void stream::_commit_rx(char *base, int nread) {
         }
         buffer.commit(nread);
         try {
-            if(_decoder->decode(buffer))
+            if(_decoder->decode(buffer)) {
                 reading_fiber->resume(int_status::make(nread));
+                return;
+            }
+            if(_timeout > 0)
+                uv_timer_start(_timeOuter, callbacks::on_read_timeout, _timeout, 0);
         }
         catch(runtime_error &ex) {
             uv_read_stop(handle);
-            uv_timer_stop(_timeOuter);
             _decoder.reset();
             reading_fiber->raise(ex.what());
         }
@@ -175,22 +185,16 @@ void stream::_commit_rx(char *base, int nread) {
     }
 }
 
-static void stream_on_read_timeout(uv_timer_t* handle) {
-    stream *self = (stream *)handle->data;
-    self->reading_fiber->resume(int_status::make(UV_ETIMEDOUT));
-}
-
 shared_ptr<int_status> stream::_do_read() {
     int r;
     if(!fiber::current()) throw logic_error("outside-fiber read");
     if((r = uv_read_start(handle, callbacks::on_alloc, callbacks::on_data)) < 0)
         throw IOERR(r);
     if(_timeout > 0)
-        uv_timer_start(_timeOuter, stream_on_read_timeout, _timeout, 0);
+        uv_timer_start(_timeOuter, callbacks::on_read_timeout, _timeout, 0);
     fiber::preserve p(reading_fiber);
     auto s = fiber::yield<int_status>();
     uv_read_stop(handle);
-    uv_timer_stop(_timeOuter);
     return s;
 }
 
@@ -301,10 +305,10 @@ unix_stream::unix_stream() {
     handle->data = this;
 }
 
-void unix_stream::connect(const shared_ptr<string> &path)
+void unix_stream::connect(const string &path)
 {
     write_request *req = new write_request;
-    uv_pipe_connect(&req->connect_req, (uv_pipe_t *)handle, path->c_str(), stream_on_connect);
+    uv_pipe_connect(&req->connect_req, (uv_pipe_t *)handle, path.c_str(), stream_on_connect);
     auto s = fiber::yield<int_status>();
     if(s->status() != 0)
         throw IOERR(s->status());
@@ -336,13 +340,13 @@ const sockaddr *ip_endpoint::sa() {
     return (sockaddr *)&_sa;
 }
 
-shared_ptr<string> ip_endpoint::straddr() {
+string ip_endpoint::straddr() {
     char ip[20];
     if (_sa.ss_family == AF_INET)
         uv_inet_ntop(AF_INET, &_sa_in.sin_addr, ip, sizeof(ip));
     else if (_sa.ss_family == AF_INET6)
         uv_inet_ntop(AF_INET6, &_sa_in6.sin6_addr, ip, sizeof(ip));
-    return make_shared<string>(ip);
+    return string(ip);
 }
 
 tcp_server::tcp_server(const char *addr, int port) {

@@ -5,68 +5,65 @@
 #include "xyfcgi.h"
 #include <vector>
 #include <ostream>
-#include <regex>
 
 class http_service_chain : public http_service {
 public:
+    class match_router : public http_service {
+    public:
+        match_router(std::string path, P<http_service> svc)
+            : _matchPath(std::move(path)), _service(std::move(svc)) {}
+        virtual void serve(http_trx &tx);
+        virtual ~match_router();
+    private:
+        std::string _matchPath;
+        P<http_service> _service;
+    };
+
     virtual void serve(http_trx &tx);
-    virtual void append(shared_ptr<http_service> svc);
+    virtual void append(P<http_service> svc);
     template<typename _Tp, typename... _Args>
     inline void append(_Args&&... __args) {
-        append(make_shared<_Tp>(forward<_Args>(__args)...));
+        append(std::make_shared<_Tp>(std::forward<_Args>(__args)...));
     }
-    virtual void route(const string &r, shared_ptr<http_service> svc);
     template<typename _Tp, typename... _Args>
-    inline void route(const string &r, _Args&&... __args) {
-        route(r, make_shared<_Tp>(forward<_Args>(__args)...));
+    inline void route(const std::string &path, _Args&&... __args) {
+        append(std::make_shared<match_router>(path,
+                std::make_shared<_Tp>(std::forward<_Args>(__args)...)));
     }
-    inline shared_ptr<http_service> &operator[](int i) {
+    inline P<http_service> &operator[](int i) {
         return _svcs.at(i);
     }
     inline int size() const {
         return _svcs.size();
     }
-    static shared_ptr<http_service_chain>
-        build(const function<void(http_service_chain *)> &builder);
+    static P<http_service_chain>
+        build(const std::function<void(http_service_chain *)> &builder);
 private:
-    vector<shared_ptr<http_service>> _svcs;
+    std::vector<P<http_service>> _svcs;
 };
 
 class local_file_service : public http_service {
 public:
-    explicit local_file_service(const string &docroot);
-    inline shared_ptr<string> document_root() {
-        return _docroot;
-    }
-    void set_document_root(const string &docroot);
-    void add_default_name(const string &defdoc);
-    void register_mimetype(const string &ext, const string &type);
-    void register_mimetype(const string &ext, shared_ptr<string> type);
-    void register_fcgi(const string &ext, shared_ptr<fcgi_provider> provider);
+    explicit local_file_service(const std::string &docroot);
+    inline chunk document_root() { return _docroot; }
+    void set_document_root(const std::string &docroot);
+    void add_default_name(const std::string &defdoc);
+    void register_mimetype(const std::string &ext, chunk type);
+    void register_fcgi(const std::string &ext, P<fcgi_provider> provider);
     virtual void serve(http_trx &tx);
 private:
-    shared_ptr<string> _docroot;
-    vector<string> _defdocs;
-    unordered_map<string, shared_ptr<string>> _mimetypes;
-    unordered_map<string, shared_ptr<fcgi_provider>> _fcgi_providers;
+    std::string _docroot;
+    std::vector<std::string> _defdocs;
+    std::unordered_map<std::string, chunk> _mimetypes;
+    std::unordered_map<std::string, P<fcgi_provider>> _fcgi_providers;
 };
 
 class logger_service : public http_service {
 public:
-    explicit logger_service(ostream &os);
+    explicit logger_service(std::ostream *os);
     virtual void serve(http_trx &tx);
 private:
-    ostream &_os;
-};
-
-class basic_authenticator : public http_service {
-public:
-    basic_authenticator(const string &realm,
-                        const function<bool(const string &, const string&)> &authf);
-    virtual void serve(http_trx &tx);
-private:
-    string _realm;
-    function<bool(const string &, const string&)> _authf;
+    std::ostream &_os;
 };
 
 class tls_filter_service : public http_service {
@@ -80,63 +77,42 @@ private:
 class host_dispatch_service : public http_service {
 public:
     host_dispatch_service();
-    void register_host(const string &hostname, shared_ptr<http_service> svc);
-    void unregister_host(const string &hostname);
-    void set_default(shared_ptr<http_service> svc);
-    static string normalize_hostname(shared_ptr<string> hostname);
+    void register_host(const std::string &hostname, P<http_service> svc);
+    void unregister_host(const std::string &hostname);
+    void set_default(P<http_service> svc);
+    static std::string normalize_hostname(chunk hostname);
     virtual void serve(http_trx &tx);
 private:
-    shared_ptr<http_service> _default;
-    unordered_map<string, shared_ptr<http_service>> _svcmap;
+    P<http_service> _default;
+    std::unordered_map<std::string, P<http_service>> _svcmap;
 };
 
 class proxy_pass_service : public http_service {
 public:
     proxy_pass_service();
-    proxy_pass_service(const string &host, int port);
+    proxy_pass_service(const std::string &host, int port);
     virtual void serve(http_trx &tx);
-    virtual void append(shared_ptr<ip_endpoint> ep);
-    virtual void append(const string &host, int port);
-    inline shared_ptr<ip_endpoint> &operator[](int i) {
+    virtual void append(P<ip_endpoint> ep);
+    virtual void append(const std::string &host, int port);
+    inline P<ip_endpoint> &operator[](int i) {
         return _svcs.at(i);
     }
     inline int count() const {
         return _svcs.size();
     }
 private:
-    vector<shared_ptr<ip_endpoint>> _svcs;
+    std::vector<P<ip_endpoint>> _svcs;
     int _cur;
-};
-
-class plain_data_service : public http_service {
-public:
-    plain_data_service(const string &data);
-    plain_data_service(const string &data, const string &ctype);
-    void update_data(const string &data);
-    virtual void serve(http_trx &tx);
-private:
-    void update_etag();
-    string _data, _ctype, _etag;
-};
-
-class regex_route : public http_service {
-public:
-    explicit regex_route(const string &pat, shared_ptr<http_service> svc);
-    explicit regex_route(const regex &pat, shared_ptr<http_service> svc);
-    virtual void serve(http_trx &tx);
-private:
-    regex _pattern;
-    shared_ptr<http_service> _svc;
 };
 
 class lambda_service : public http_service {
 public:
-    lambda_service(const function<void(http_trx &)> &func);
-    lambda_service(const function<void(shared_ptr<websocket>)> &func);
+    lambda_service(const std::function<void(http_trx &)> &func);
+    lambda_service(const std::function<void(P<websocket>)> &func);
     virtual void serve(http_trx &tx);
 private:
-    function<void(http_trx &)> _func;
-    function<void(shared_ptr<websocket>)> _ws_func;
+    std::function<void(http_trx &)> _func;
+    std::function<void(P<websocket>)> _ws_func;
 };
 
 class connect_proxy : public http_service {

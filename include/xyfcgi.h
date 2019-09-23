@@ -34,7 +34,7 @@ public:
     }
     virtual void serialize(char *buf);
     virtual int serialize_size();
-    static shared_ptr<fcgi_message> make_dummy(message_type t);
+    static P<fcgi_message> make_dummy(message_type t);
 
     class decoder : public ::decoder {
     public:
@@ -51,50 +51,49 @@ private:
 
 class fcgi_connection {
 public:
-    void set_env(const string &key, shared_ptr<string> val);
-    void set_env(const string &key, const string &val);
-    shared_ptr<string> get_env(const string &key);
+    void set_env(const std::string &key, chunk val);
+    chunk get_env(const std::string &key);
     void write(const char *data, int len);
-    void write(const shared_ptr<string> &msg);
+    void write(const chunk &msg);
     template<class T>
-    inline shared_ptr<T> read(shared_ptr<decoder> dec) {
-        return dynamic_pointer_cast<T>(read(move(dec)));
+    inline P<T> read(P<decoder> dec) {
+        return std::dynamic_pointer_cast<T>(read(move(dec)));
     }
-    shared_ptr<message> read(shared_ptr<decoder> dec);
+    P<message> read(P<decoder> dec);
 
-    fcgi_connection(const shared_ptr<stream> &strm, int roleId);
+    fcgi_connection(const P<stream> &strm, int roleId);
 private:
     fcgi_connection(const fcgi_connection &);
 
     void flush_env();
-    unordered_map<string, shared_ptr<string>> _env;
-    shared_ptr<stream> _strm;
+    std::unordered_map<std::string, chunk> _env;
+    P<stream> _strm;
     bool _envready;
     stream_buffer _buffer;
 };
 
 class fcgi_provider { 
 public:
-    virtual shared_ptr<fcgi_connection> get_connection() = 0;
+    virtual P<fcgi_connection> get_connection() = 0;
 };
 
 class tcp_fcgi_provider : public fcgi_provider { 
 public:
-    virtual shared_ptr<fcgi_connection> get_connection();
-    tcp_fcgi_provider(const string &hostip, int port);
+    virtual P<fcgi_connection> get_connection();
+    tcp_fcgi_provider(const std::string &hostip, int port);
 private:
-    string _hostip;
+    std::string _hostip;
     int _port;
 };
 
 class unix_fcgi_provider : public fcgi_provider {
 public:
-    virtual shared_ptr<fcgi_connection> get_connection();
-    unix_fcgi_provider(const string &path);
-    unix_fcgi_provider(const shared_ptr<string> &path);
-    inline shared_ptr<string> path() { return _path; }
+    virtual P<fcgi_connection> get_connection();
+    unix_fcgi_provider(const std::string &path);
+    unix_fcgi_provider(const P<std::string> &path);
+    inline const std::string &path() const { return _path; }
 private:
-    shared_ptr<string> _path;
+    std::string _path;
 };
 
 #endif

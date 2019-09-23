@@ -2,6 +2,20 @@
 #include <cstring>
 #include <vector>
 
+using namespace std;
+
+chunk::chunk(const char *buf, size_t siz) : _X(nullptr) {
+    if(buf == nullptr)
+        return;
+    _X = (_storage *)malloc(sizeof(_storage) + siz + 1);
+    if(!_X)
+        throw std::bad_alloc();
+    _X->_nRef = 1;
+    _X->_size = siz;
+    memcpy(_X->Y, buf, siz);
+    _X->Y[siz] = 0;
+}
+
 void message::serialize(char *buf) {
     throw RTERR("serialize not implemented");
 }
@@ -36,15 +50,14 @@ void stream_buffer::commit(size_t nbytes) {
     _avail += nbytes;
     // Shrink the buffer. If returned address is not _data, logic
     // error or memory overrun must occurred. Check it!
-    if(realloc(_data, _avail) != _data)
-        throw std::bad_alloc();
+    _data = (char *)realloc(_data, _avail);
 }
 
 /**
  * Serial message in msg and append the serialized data to the buffer.
  * @param msg Pointer to the message.
  */
-void stream_buffer::append(const shared_ptr<message> &msg) {
+void stream_buffer::append(const P<message> &msg) {
     int size = msg->serialize_size();
     if(size > 0) {
         msg->serialize(prepare(size));
@@ -115,38 +128,27 @@ string_message::~string_message() {
     _size = 0;
 }
 
-string_decoder::string_decoder() : nbyte(0) {}
+string_decoder::string_decoder(int bytesToRead)
+    : _nBytes(0), _restBytes(bytesToRead) {}
 
 bool string_decoder::decode(stream_buffer &stb) {
-    if(stb.size() > 0) {
-        nbyte = stb.size();
-        _msg = make_shared<string_message>(stb.detach(), nbyte);
+    if(stb.size() == 0)
+        return false;
+    _nBytes = stb.size();
+    if(_restBytes == -1) {
+        _msg = make_shared<string_message>(stb.detach(), _nBytes);
         return true;
-    }
-    return false;
-}
-
-string_decoder::~string_decoder() {}
-
-rest_decoder::rest_decoder(int rest) : nrest(rest), string_decoder() {}
-
-bool rest_decoder::decode(stream_buffer &stb) {
-    if(nrest == 0)
-        throw runtime_error("no more data to read");
-    if(stb.size() <= nrest) {
-        if(stb.size() == 0) return false;
-        nbyte = stb.size();
-        _msg = make_shared<string_message>(stb.detach(), nbyte);
-        nrest -= nbyte;
+    } else if(stb.size() <= _restBytes) {
+        _msg = make_shared<string_message>(stb.detach(), _nBytes);
     } else {
-        nbyte = nrest;
-        char *buffer = (char *)malloc(nbyte);
-        memcpy(buffer, stb.data(), nbyte);
-        _msg = make_shared<string_message>(buffer, nbyte);
-        stb.pull(nbyte);
-        nrest -= nbyte;
+        _nBytes = _restBytes;
+        char *buffer = (char *)malloc(_nBytes);
+        memcpy(buffer, stb.data(), _nBytes);
+        _msg = make_shared<string_message>(buffer, _nBytes);
+        stb.pull(_nBytes);
     }
+    _restBytes -= _nBytes;
     return true;
 }
 
-rest_decoder::~rest_decoder() {}
+string_decoder::~string_decoder() {}

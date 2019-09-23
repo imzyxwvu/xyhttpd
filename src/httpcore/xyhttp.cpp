@@ -3,29 +3,33 @@
 
 #include "xyhttp.h"
 
-http_connection::http_connection(
-    shared_ptr<http_service> svc, shared_ptr<stream> strm, shared_ptr<string> pname)
-    : _reqdec(make_shared<http_request::decoder>()), _svc(svc), _strm(strm),
+using namespace std;
+
+http_connection::http_connection(P<stream> strm, string pname)
+    : _reqdec(make_shared<http_request::decoder>()), _strm(strm),
       _keep_alive(true), _upgraded(false), _peername(pname) {}
 
-shared_ptr<http_request> http_connection::next_request() {
-    shared_ptr<http_request> _req = _strm->read<http_request>(_reqdec);
-    if(!_req) {
+P<http_request> http_connection::next_request() {
+    try {
+        P<http_request> _req = _strm->read<http_request>(_reqdec);
+        chunk connhdr = _req->header("connection");
+        if(connhdr) {
+            _keep_alive = connhdr.find("keep-alive") != -1 ||
+                          connhdr.find("Keep-Alive") != -1;
+        } else {
+            _keep_alive = false;
+        }
+        return _req;
+    }
+    catch(exception &ex) {
         _keep_alive = false;
+        _strm.reset();
         return nullptr;
     }
-    shared_ptr<string> connhdr = _req->header("connection");
-    if(connhdr) {
-        _keep_alive = connhdr->find("keep-alive", 0, 10) != string::npos ||
-                      connhdr->find("Keep-Alive", 0, 10) != string::npos;
-    } else {
-        _keep_alive = false;
-    }
-    return _req;
 }
 
 bool http_connection::keep_alive() {
-    return _keep_alive && !_upgraded;
+    return _keep_alive && _strm && !_upgraded;
 }
 
 shared_ptr<stream> http_connection::upgrade() {
@@ -34,19 +38,22 @@ shared_ptr<stream> http_connection::upgrade() {
     return _strm;
 }
 
-void http_connection::invoke_service(http_trx &tx) {
+void http_connection::invoke_service(const P<http_service> &svc, http_trx &tx) {
     try {
-        if(!tx->request->header("host"))
+        if(!tx->request->header("host")) {
             tx->display_error(400);
-        _svc->serve(tx);
+            _strm.reset();
+            return;
+        }
+        svc->serve(tx);
         if(!tx->header_sent())
             tx->display_error(404);
     }
     catch(extended_runtime_error &ex) {
         if(tx->header_sent()) {
-            cerr<<"["<<timelabel()<<" "<<*peername()<<"] ";
+            cerr<<"["<<timelabel()<<" "<<peername()<<"] ";
             cerr<<ex.filename()<<":"<<ex.lineno()<<": "<<ex.what()<<endl;
-            _keep_alive = false;
+            _strm.reset();
             return;
         }
         auto resp = tx->get_response(500);
@@ -63,8 +70,8 @@ void http_connection::invoke_service(http_trx &tx) {
     }
     catch(exception &ex) {
         if(tx->header_sent()) {
-            cerr<<"["<<timelabel()<<" "<<*peername()<<"] "<<ex.what()<<endl;
-            _keep_alive = false;
+            cerr<<"["<<timelabel()<<" "<<peername()<<"] "<<ex.what()<<endl;
+            _strm.reset();
             return;
         }
         auto resp = tx->get_response(500);
@@ -105,32 +112,25 @@ static void http_server_on_connection(uv_stream_t* strm, int status) {
             delete client;
             return;
         }
-        self->start_thread(shared_ptr<stream>(client),
-                           client->getpeername()->straddr());
+        auto connection = make_shared<http_connection>(
+                shared_ptr<stream>(client), client->getpeername()->straddr());
+        fiber::launch(bind(&http_server::service_loop, self, connection));
     }
 }
 
-void http_server::start_thread(shared_ptr<stream> strm, shared_ptr<string> pname) {
-    auto conn = make_shared<http_connection>(service, strm, pname);
-    fiber::launch([conn] () {
-        while(conn->keep_alive()) {
-            shared_ptr<http_request> req;
-            try {
-                req = conn->next_request();
-                if(!req) break;
-                shared_ptr<http_transaction> tx();
-                conn->invoke_service(
-                        make_shared<http_transaction>(conn, move(req)));
-            }
-            catch(exception &ex) {
-                if(strstr(ex.what(), "connection timed out"))
-                    break;
-                cerr<<"["<<timelabel()<<" "<<conn->peername()->c_str()<<"] "
-                    <<ex.what()<<endl;
-                break;
-            }
+void http_server::service_loop(P<http_connection> conn) {
+    while(conn->keep_alive()) {
+        shared_ptr<http_request> request = conn->next_request();
+        if(!request) break;
+        try {
+            conn->invoke_service(service,
+                                 make_shared<http_transaction>(conn, move(request)));
         }
-    });
+        catch(exception &ex) {
+            cerr<<"["<<timelabel()<<" "<<conn->peername()<<"] "<<ex.what()<<endl;
+            break;
+        }
+    }
 }
 
 void http_server::listen(const char *addr, int port) {

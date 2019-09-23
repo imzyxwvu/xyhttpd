@@ -3,6 +3,8 @@
 #include <iostream>
 #include "xyfcgi.h"
 
+using namespace std;
+
 bool fcgi_message::decoder::decode(stream_buffer &stb) {
     if(stb.size() >= 8) {
         unsigned char *buf = (unsigned char *)stb.data();
@@ -63,6 +65,10 @@ int fcgi_message::serialize_size() {
     return 8 + length();
 }
 
+chunk fcgi_connection::get_env(const std::string &key) {
+    return _env[key];
+}
+
 shared_ptr<fcgi_message> fcgi_message::make_dummy(fcgi_message::message_type t) {
     return make_shared<fcgi_message>(t, 0);
 }
@@ -74,15 +80,11 @@ fcgi_connection::fcgi_connection(const shared_ptr<stream> &strm, int roleId)
             fcgi_message::message_type::FCGI_BEGIN_REQUEST, 0, (char *)requestBegin, 8));
 }
 
-void fcgi_connection::set_env(const string &key, const string &val) {
-    set_env(key, make_shared<string>(val));
-}
-
-void fcgi_connection::set_env(const string &key, shared_ptr<string> val) {
+void fcgi_connection::set_env(const string &key, chunk val) {
     if(_envready)
         throw RTERR("environment variables already sent");
     if(!val) return;
-    _env[key] = val;
+    _env[key] = move(val);
 }
 
 static void append_length_bytes(stringstream &ss, int len) {
@@ -104,9 +106,9 @@ void fcgi_connection::flush_env() {
     for(auto it = _env.cbegin(); it != _env.cend(); it++) {
         if(!it->second) continue;
         append_length_bytes(ss, it->first.size());
-        append_length_bytes(ss, it->second->size());
+        append_length_bytes(ss, it->second.size());
         ss.write(it->first.data(), it->first.size());
-        ss.write(it->second->data(), it->second->size());
+        ss.write(it->second.data(), it->second.size());
     }
     _strm->write(make_shared<fcgi_message>(
             fcgi_message::message_type::FCGI_PARAMS, 0, ss.str().data(), ss.str().size()));
@@ -119,8 +121,8 @@ void fcgi_connection::write(const char *data, int len) {
     _strm->write(make_shared<fcgi_message>(fcgi_message::message_type::FCGI_STDIN, 0, data, len));
 }
 
-void fcgi_connection::write(const shared_ptr<string> &msg) {
-    write(msg->data(), msg->size());
+void fcgi_connection::write(const chunk &msg) {
+    write(msg.data(), msg.size());
 }
 
 shared_ptr<message> fcgi_connection::read(shared_ptr<decoder> decoder) {
@@ -162,9 +164,6 @@ shared_ptr<fcgi_connection> tcp_fcgi_provider::get_connection()
 }
 
 unix_fcgi_provider::unix_fcgi_provider(const string &p)
-    : _path(make_shared<string>(p)) {}
-
-unix_fcgi_provider::unix_fcgi_provider(const shared_ptr<string> &p)
     : _path(p) {}
 
 shared_ptr<fcgi_connection> unix_fcgi_provider::get_connection()
