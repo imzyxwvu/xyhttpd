@@ -11,8 +11,10 @@ find_package(PkgConfig)
 
 find_library(GTEST_LIBRARIES NAMES gtest gtest_main)
 pkg_search_module(LIBUV REQUIRED libuv)
+pkg_search_module(LUAJIT REQUIRED luajit)
 
 include_directories(include)
+add_compile_options(-fPIC -fsanitize=leak)
 set(HEADER_FILES
         include/xycommon.h
         include/xyfcgi.h
@@ -38,6 +40,16 @@ target_link_libraries(iocore ${LIBUV_LIBRARIES} ${ZLIB_LIBRARIES} ${OPENSSL_LIBR
 add_executable(tinyhttpd src/tinyhttpd/tinyhttpd.cpp)
 target_link_libraries(tinyhttpd iocore)
 
+add_compile_options(${LUAJIT_CFLAGS})
+
+add_library(liocore SHARED src/luabridge/liocore.cpp src/luabridge/liocore.h src/luabridge/lhttptrx.cpp)
+set_target_properties(liocore PROPERTIES PREFIX "")
+target_link_libraries(liocore iocore)
+
+# Delegate for debugging Lua-bridge in CLion
+add_executable(ldelegate EXCLUDE_FROM_ALL src/luabridge/delegate.c)
+target_link_libraries(ldelegate ${LUAJIT_LIBRARIES})
+
 if(GTEST_LIBRARIES)
     enable_testing()
 
@@ -48,3 +60,7 @@ else()
     message(STATUS "Note: "
             "Google Test is not found on your system. Unit tests are skipped.")
 endif()
+
+install(TARGETS tinyhttpd liocore
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib/lua/5.1)
