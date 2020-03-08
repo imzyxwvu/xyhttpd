@@ -38,7 +38,11 @@ local_file_service::local_file_service(const string &docroot) {
 
 void local_file_service::set_document_root(const string &docroot) {
     char absDocRoot[PATH_MAX];
+#ifdef _WIN32
+    if(_fullpath(absDocRoot, docroot.c_str(), sizeof(absDocRoot))) {
+#else
     if(realpath(docroot.c_str(), absDocRoot)) {
+#endif
         _docroot = absDocRoot;
     } else {
         throw RTERR("failed to resolve document root");
@@ -206,8 +210,8 @@ void host_dispatch_service::set_default(shared_ptr<http_service> svc) {
 }
 
 string host_dispatch_service::normalize_hostname(chunk hostname) {
-    char buf[NAME_MAX];
-    if(hostname.size() > NAME_MAX - 1)
+    char buf[512];
+    if(hostname.size() > sizeof(buf) - 1)
         throw RTERR("hostname too long");
     strcpy(buf, hostname.data());
     char *portBase = strchr(buf, ':');

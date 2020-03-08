@@ -8,6 +8,7 @@ using namespace std;
 
 #ifdef _WIN32
 # include <windows.h>
+# include <ctime>
 fiber_context_t fiber::maincontext = NULL;
 #else
 # include <sys/mman.h>
@@ -31,10 +32,10 @@ std::string fmt(const char *f, ...) {
 }
 
 std::string timelabel() {
-    time_t now = time(NULL);
+    time_t now = ::time(NULL);
     char tmlabel[32];
     int len = strftime(tmlabel, sizeof(tmlabel),
-                       "%Y-%m-%d %H:%M:%S", localtime(&now));
+                       "%Y-%m-%d %H:%M:%S", ::localtime(&now));
     return string(tmlabel, len);
 }
 

@@ -62,6 +62,7 @@ void print_usage(const char *progname) {
     puts("");
 }
 
+#ifndef _WIN32
 void become_daemon()
 {
     pid_t child = fork();
@@ -77,6 +78,7 @@ void become_daemon()
     close(0); // Close stdin stream
     open("/dev/null", O_RDONLY);
 }
+#endif
 
 static void register_mimetypes(P<local_file_service> &svc) {
     svc->register_mimetype("mid midi kar", "audio/midi");
@@ -169,13 +171,13 @@ static void register_mimetypes(P<local_file_service> &svc) {
 
 int main(int argc, char *argv[])
 {
-    char bindAddr[NAME_MAX] = "0.0.0.0";
+    char bindAddr[PATH_MAX] = "0.0.0.0";
     int port = 8080;
     auto fileService = make_shared<local_file_service>(pwd());
     auto proxyService = make_shared<proxy_pass_service>();
     char *portBase;
     char suffix[16];
-    char backend[NAME_MAX];
+    char backend[PATH_MAX];
     int opt;
     shared_ptr<tls_context> ctx;
     bool daemonize = false;
@@ -259,7 +261,10 @@ int main(int argc, char *argv[])
                 return EXIT_FAILURE;
         }
     }
+#ifndef _WIN32
     if(daemonize) become_daemon();
+    signal(SIGPIPE, SIG_IGN);
+#endif
     register_mimetypes(fileService);
     try {
         auto svcChain = make_shared<http_service_chain>();
@@ -276,7 +281,6 @@ int main(int argc, char *argv[])
     }
     signal_watcher watchint(SIGINT);
     signal_watcher watchterm(SIGTERM);
-    signal(SIGPIPE, SIG_IGN);
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
     return EXIT_SUCCESS;
 }

@@ -8,6 +8,7 @@
 #include <zlib.h>
 #include <openssl/sha.h> // used by http_transaction::accept_websocket
 #include <cassert>
+#include <ctime>
 
 using namespace std;
 
@@ -142,8 +143,8 @@ void http_transaction::serve_file(const string &filename) {
         return;
     }
     char ftbuf[64];
-    int tlen = strftime(ftbuf, sizeof(ftbuf),
-        "%a, %d %b %Y %H:%M:%S GMT", gmtime(&info.st_mtime));
+    int tlen = ::strftime(ftbuf, sizeof(ftbuf),
+        "%a, %d %b %Y %H:%M:%S GMT", ::gmtime(&info.st_mtime));
     string modtime(ftbuf, tlen);
     chunk chktime = request->header("if-modified-since");
     if(chktime && modtime == chktime) {
@@ -199,7 +200,11 @@ void http_transaction::serve_file(const string &filename, struct stat &info) {
         _tx_buffer.pull(_tx_buffer.size());
         start_transfer(SIMPLE);
     }
+#ifdef _WIN32
+    size_t chunkSize = 8192;
+#else
     size_t chunkSize = max<size_t>(info.st_blksize, 8192) * 2;
+#endif
     char *buf = new char[chunkSize];
     while(rest > 0) {
         size_t avail = read(fd, buf, min<size_t>(chunkSize, rest));
