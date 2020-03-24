@@ -20,7 +20,7 @@ TEST(IO, FiberMultilevel) {
         checkpoints[0] = true;
         ASSERT_NO_THROW(fiber::yield());
         ASSERT_EQ(fiber::current(), f1);
-        ASSERT_ANY_THROW(f1->resume()); // Test self resume
+        ASSERT_ANY_THROW(f1->resume(0)); // Test self resume
         checkpoints[3] = true;
         ASSERT_ANY_THROW(fiber::yield());
         ASSERT_TRUE(checkpoints[4]);
@@ -31,7 +31,7 @@ TEST(IO, FiberMultilevel) {
     f2 = fiber::launch([&checkpoints, f1] () {
         checkpoints[1] = true;
         fiber::yield();
-        f1->resume(); // Test multi-level resume
+        f1->resume(0); // Test multi-level resume
         ASSERT_TRUE(checkpoints[3]);
         checkpoints[4] = true;
         fiber::yield();
@@ -44,18 +44,18 @@ TEST(IO, FiberMultilevel) {
     f3 = fiber::launch([&checkpoints, f1, f2] () {
         checkpoints[2] = true;
         fiber::yield();
-        f2->resume();
+        f2->resume(0);
         ASSERT_TRUE(checkpoints[6]);
         checkpoints[7] = true;
     });
     ASSERT_TRUE(checkpoints[2]);
 
     ASSERT_TRUE(!fiber::current());
-    f2->resume();
+    f2->resume(0);
     ASSERT_TRUE(checkpoints[4]);
-    f3->resume();
+    f3->resume(0);
     ASSERT_TRUE(checkpoints[7]);
-    ASSERT_ANY_THROW(f1->resume());
+    ASSERT_ANY_THROW(f1->resume(0));
 
     // Check resource release
     ASSERT_EQ(f3.use_count(), 1);

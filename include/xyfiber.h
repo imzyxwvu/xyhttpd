@@ -12,11 +12,6 @@ typedef ucontext_t fiber_context_t;
 
 #include "xycommon.h"
 
-class wakeup_event {
-public:
-    virtual ~wakeup_event() = 0;
-};
-
 class fiber {
 private:
 #ifndef _WIN32
@@ -47,17 +42,9 @@ public:
 
     fiber(const fiber &) = delete;
     explicit fiber(std::function<void()>);
-    template<class T>
-    inline static P<T> yield() {
-        return std::dynamic_pointer_cast<T>(yield());
-    }
-    static P<wakeup_event> yield();
-    void resume();
+    static int yield();
+    void resume(int event);
     void raise(const std::string &ex);
-    inline void resume(P<wakeup_event> evt) {
-        _event = move(evt);
-        resume();
-    }
     static P<fiber> launch(std::function<void()>);
     inline static P<fiber> current() {
         return _current;
@@ -66,14 +53,13 @@ public:
 private:
     static void wrapper(fiber *f);
     fiber_context_t context;
-    P<wakeup_event> _event;
+    int _event;
     bool _terminated;
     std::function<void()> _entry;
     P<fiber> self, _prev;
     P<std::runtime_error> _err;
     static std::shared_ptr<fiber> _current;
     static fiber_context_t maincontext;
-
     static int stack_pool_target;
 };
 

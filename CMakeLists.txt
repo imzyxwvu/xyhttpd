@@ -14,7 +14,6 @@ pkg_search_module(LIBUV REQUIRED libuv)
 
 include_directories(include)
 set(HEADER_FILES
-        include/xybuffer.h
         include/xycommon.h
         include/xyfcgi.h
         include/xyfiber.h
@@ -22,11 +21,9 @@ set(HEADER_FILES
         include/xyhttpsvc.h
         include/xyhttptls.h
         include/xystream.h
-        include/xytlsstream.h
         )
 set(SOURCE_FILES
         src/httpcore/xybase64.cpp
-        src/httpcore/xybuffer.cpp
         src/httpcore/xyfcgi.cpp
         src/httpcore/xyfiber.cpp
         src/httpcore/xyhttp.cpp
@@ -34,7 +31,6 @@ set(SOURCE_FILES
         src/httpcore/xyhttpsvc.cpp
         src/httpcore/xyhttptls.cpp
         src/httpcore/xystream.cpp
-        src/httpcore/xytlsstream.cpp
         )
 add_library(iocore ${SOURCE_FILES} ${HEADER_FILES})
 target_link_libraries(iocore ${LIBUV_LIBRARIES} ${ZLIB_LIBRARIES} ${OPENSSL_LIBRARIES})

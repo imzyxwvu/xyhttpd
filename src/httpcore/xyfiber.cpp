@@ -76,7 +76,6 @@ char **extended_runtime_error::stacktrace() {
 
 #endif
 
-wakeup_event::~wakeup_event() {}
 int fiber::stack_pool_target = 32;
 
 #ifndef _WIN32
@@ -126,7 +125,7 @@ void fiber::wrapper(fiber *f) {
                 !f->_prev ? &maincontext : &f->_prev->context);
 }
 
-P<wakeup_event> fiber::yield() {
+int fiber::yield() {
     if(!_current)
         throw RTERR("yielding outside a fiber");
     P<fiber> self = _current;
@@ -138,14 +137,15 @@ P<wakeup_event> fiber::yield() {
         self->_err.reset();
         throw ex;
     }
-    return move(self->_event);
+    return self->_event;
 }
 
-void fiber::resume() {
+void fiber::resume(int event) {
     if(_terminated || _current == self)
         throw RTERR("resuming terminated or current fiber");
     _prev = move(_current);
     _current = self;
+    _event = event;
     swapcontext(_prev ? &_prev->context : &maincontext, &context);
     if(_current && _current->_terminated)
         _current = move(_current->_prev);
@@ -208,13 +208,13 @@ void fiber::resume() {
 P<fiber> fiber::launch(function<void()> entry) {
     auto f = make_shared<fiber>(move(entry));
     f->self = f;
-    f->resume();
+    f->resume(0);
     return f;
 }
 
 void fiber::raise(const string &ex) {
     _err = make_shared<extended_runtime_error>("@fiber", 0, ex);
-    resume();
+    resume(-1);
 }
 
 fiber::preserve::preserve(P<fiber> &f) : _f(f) {
