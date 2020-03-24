@@ -110,7 +110,7 @@ TEST(IO, StreamBufferDecoding) {
     ASSERT_EQ(request->method, "POST");
     ASSERT_TRUE(request->path() == "/test");
     ASSERT_TRUE(request->query() =="hello=world");
-    ASSERT_EQ(atoi(request->header("content-length")),sb.size());
+    ASSERT_EQ(atoi(request->header("content-length").data()),sb.size());
     ASSERT_TRUE(request->header_include("user-agent", "test_request"));
     sb.pull(sb.size());
 
@@ -121,7 +121,7 @@ TEST(IO, StreamBufferDecoding) {
     ASSERT_TRUE(request_decoder->decode(sb));
     ASSERT_EQ(sb.size(), 0);
     request = dynamic_pointer_cast<http_request>(request_decoder->msg());
-    ASSERT_EQ(request->header("content-length"), nullptr);
+    ASSERT_FALSE(request->header("content-length"));
     ASSERT_TRUE(request->header_include("user-agent", "test_request"));
 }
 
@@ -192,7 +192,7 @@ TEST(IO, TcpStream) {
         ASSERT_EQ(request->method, "POST");
 
         auto content_decoder = make_shared<string_decoder>(
-                atoi(request->header("content-length")));
+                atoi(request->header("content-length").data()));
         stream_buffer content_sb;
         while(content_decoder->more())
             content_sb.append(strm->read<string_message>(content_decoder));
@@ -355,6 +355,7 @@ TEST(IO, HttpServer) {
         // Test gzip compression
         req->set_resource("/large-data");
         req->set_header("Accept-Encoding", "deflate, gzip");
+        req->set_header("Connection", "close");
         client->write(req);
         resp = client->read<http_response>(response_decoder);
         ASSERT_EQ(resp->code(), 200);
@@ -377,5 +378,66 @@ TEST(IO, HttpServer) {
     // Check resource release
     int handle_count = 0;
     uv_walk(uv_default_loop(), handle_walker, &handle_count);
-    ASSERT_EQ(handle_count, 1); // Should be the two tcp servers
+    ASSERT_EQ(handle_count, 1); // Should be the tcp server
+}
+
+TEST(IO, WebSocket) {
+    bool checkpoint_received = false, checkpoint_closed = false;
+    http_server server(make_shared<lambda_service>([&] (http_trx &tx) {
+        if(tx->request->path() != "/connect") {
+            tx->display_error(404);
+            return;
+        }
+        auto ws = tx->accept_websocket();
+        // Simple ECHO service
+        while(ws->poll()) {
+            auto msg = ws->read();
+            if(msg.to_string() == "Nyanpasu")
+                checkpoint_received = true;
+            ws->send(msg);
+        }
+        checkpoint_closed = true;
+    }));
+    server.listen("127.0.0.1", TEST_BIND_PORT);
+
+    bool checkpoint_finished = false;
+    fiber::launch([&checkpoint_finished] () {
+        auto client = make_shared<tcp_stream>();
+        client->connect("127.0.0.1", TEST_BIND_PORT);
+        auto req = make_shared<http_request>();
+        auto response_decoder = make_shared<http_response::decoder>();
+        req->method = "GET";
+        req->set_header("Upgrade", "websocket");
+        req->set_header("Host", "localhost");
+        string sec_key = to_string(rand());
+        req->set_header("Sec-WebSocket-Key",
+                base64_encode((const unsigned char *)sec_key.data(), sec_key.size()));
+        req->set_resource("/connect");
+        client->write(req);
+        auto resp = client->read<http_response>(response_decoder);
+        ASSERT_EQ(resp->code(), 101);
+
+        client->write(make_shared<websocket_frame>(1, "Nyanpasu"));
+        auto ws_decoder = make_shared<websocket_frame::decoder>(0x100);
+        auto echo = client->read<websocket_frame>(ws_decoder);
+        ASSERT_TRUE(echo->payload().to_string() == "Nyanpasu");
+        client->write(make_shared<websocket_frame>(9, nullptr));
+        echo = client->read<websocket_frame>(ws_decoder);
+        ASSERT_EQ(echo->opcode(), 10); // PING will be respond by PONG
+        client->write(make_shared<websocket_frame>(8, nullptr));
+
+        uv_stop(uv_default_loop());
+        checkpoint_finished = true;
+    });
+    uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+    ASSERT_TRUE(checkpoint_received);
+    ASSERT_TRUE(checkpoint_closed);
+    ASSERT_TRUE(checkpoint_finished);
+    // Give fibers a chance to finish
+    uv_run(uv_default_loop(), UV_RUN_NOWAIT);
+
+    // Check resource release
+    int handle_count = 0;
+    uv_walk(uv_default_loop(), handle_walker, &handle_count);
+    ASSERT_EQ(handle_count, 1); // Should be the tcp server
 }

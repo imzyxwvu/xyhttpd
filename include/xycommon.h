@@ -117,20 +117,9 @@ public:
         return memcmp(data(), rhs.data(), size()) == 0;
     }
 
-    inline bool operator==(const char *rhs) noexcept {
-        if(_X == nullptr || rhs == nullptr)
-            return (void *)_X == (void *)rhs;
-        int i = 0;
-        for(; i < size() && rhs[i]; i++) {
-            if(_X->Y[i] != rhs[i])
-                return false;
-        }
-        return i == size() && !rhs[i];
-    }
-
+    inline std::string to_string() { return std::string(data(), size()); }
     inline size_t size() const noexcept { return _X ? _X->_size : 0; }
     inline char &operator[] (int idx) { return _X->Y[idx]; }
-    inline operator const char *() const noexcept { return data(); }
     inline operator bool() const noexcept { return (bool)_X; }
     inline bool empty() const noexcept { return _X ? _X->_size == 0 : true; }
 };

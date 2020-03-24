@@ -31,7 +31,6 @@ set(SOURCE_FILES
         src/httpcore/xyfiber.cpp
         src/httpcore/xyhttp.cpp
         src/httpcore/xyhttpapi.cpp
-        src/httpcore/xyhttpmsg.cpp
         src/httpcore/xyhttpsvc.cpp
         src/httpcore/xyhttptls.cpp
         src/httpcore/xystream.cpp

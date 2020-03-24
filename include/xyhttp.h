@@ -16,7 +16,7 @@ public:
     http_request() = default;
     inline chunk resource() const { return _resource; }
     void set_resource(chunk res);
-    inline chunk path() const { return _path; }
+    inline std::string path() const { return _path; }
     inline chunk query() const { return _query; }
     inline chunk header(const std::string &key) {
         auto it = _headers.find(key);
@@ -41,7 +41,8 @@ public:
         virtual ~decoder();
     };
 private:
-    chunk _resource, _path, _query;
+    chunk _resource, _query;
+    std::string _path;
     std::unordered_map<std::string, chunk> _headers;
 
     http_request &operator=(const http_request &);

@@ -72,7 +72,7 @@ void local_file_service::register_fcgi(const string &ext, shared_ptr<fcgi_provid
 }
 
 void local_file_service::serve(http_trx &tx) {
-    const char *requested_res = tx->request->path();
+    const char *requested_res = tx->request->path().data();
     const char *tail = requested_res;
     struct stat info;
     string pathbuf, fullpathbuf;
@@ -107,7 +107,7 @@ void local_file_service::serve(http_trx &tx) {
     }
     if(S_ISDIR(info.st_mode)) {
         if(tx->request->resource()[tx->request->resource().size() - 1] != '/') {
-            tx->redirect_to((string)tx->request->resource() + '/');
+            tx->redirect_to(tx->request->path() + '/');
             return;
         }
         fullpathbuf += "/";
