@@ -61,12 +61,6 @@ void tls_stream::do_handshake() {
     }
 }
 
-static void tls_stream_on_write(uv_write_t *req, int status)
-{
-    free(req->data);
-    free(req);
-}
-
 void tls_stream::_commit_rx(char *base, int nread) {
     if(!_ssl) {
         stream::_commit_rx(base, nread);

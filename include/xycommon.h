@@ -76,7 +76,7 @@ public:
     // Move constructors silently clear original reference
     inline chunk(chunk &&rhs) noexcept : _X(rhs._X) { rhs._X = nullptr; }
     inline chunk &operator=(chunk &&chunk) noexcept {
-        _X = chunk._X;
+        reset(chunk._X);
         chunk._X = nullptr;
         return *this;
     }
