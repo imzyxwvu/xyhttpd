@@ -3,7 +3,6 @@
 #include <unistd.h>
 
 #include "xyhttp.h"
-#include "xywebsocket.h"
 
 #include <zlib.h>
 #include <openssl/sha.h> // used by http_transaction::accept_websocket
@@ -494,12 +493,12 @@ websocket_frame::~websocket_frame() {}
 websocket::websocket(const shared_ptr<stream> &strm, bool deflate) :
         _strm(strm), _decoder(make_shared<websocket_frame::decoder>(0x100000)),
         _tx_zs(nullptr), _rx_zs(nullptr), _msg_deflated(false), _alive(true) {
-    if(deflate) {
+    if (deflate) {
         _rx_zs = new z_stream;
         _rx_zs->zalloc = nullptr;
         _rx_zs->zfree = nullptr;
         _rx_zs->opaque = nullptr;
-        if(inflateInit2(_rx_zs, -MAX_WBITS) != Z_OK) {
+        if (inflateInit2(_rx_zs, -MAX_WBITS) != Z_OK) {
             delete _rx_zs;
             throw runtime_error("failed to initialize z_stream");
         }
@@ -507,33 +506,12 @@ websocket::websocket(const shared_ptr<stream> &strm, bool deflate) :
         _tx_zs->zalloc = nullptr;
         _tx_zs->zfree = nullptr;
         _tx_zs->opaque = nullptr;
-        if(deflateInit2(_tx_zs, Z_BEST_COMPRESSION, Z_DEFLATED, -MAX_WBITS,
-                        MAX_MEM_LEVEL, Z_DEFAULT_STRATEGY) != Z_OK) {
+        if (deflateInit2(_tx_zs, Z_BEST_COMPRESSION, Z_DEFLATED, -MAX_WBITS,
+                         MAX_MEM_LEVEL, Z_DEFAULT_STRATEGY) != Z_OK) {
             delete _tx_zs;
             _tx_zs = nullptr;
         }
     }
-    _flush_thread = fiber::launch([this] () { this->flush_writing(); });
-}
-
-void websocket::flush_writing() {
-    while(_alive) {
-        _flush_paused = false;
-        while(!_writing_queue.empty()) {
-            auto msg = _writing_queue.front();
-            _writing_queue.pop();
-            try {
-                _strm->write(msg);
-            }
-            catch(exception &ex) {
-                _alive = false;
-                return;
-            }
-        }
-        _flush_paused = true;
-        fiber::yield();
-    }
-    _flush_paused = false;
 }
 
 bool websocket::poll() {
@@ -552,8 +530,7 @@ bool websocket::poll() {
                     cleanup();
                     continue;
                 case 9: // PING
-                    _writing_queue.push(make_shared<websocket_frame>(10, frame->payload()));
-                    if(_flush_paused) _flush_thread->resume();
+                    _strm->write(make_shared<websocket_frame>(10, frame->payload()));
                     continue;
             }
             if(frame->payload())
@@ -609,20 +586,15 @@ void websocket::send(const chunk &str) {
                 throw runtime_error("deflate failure");
             sb.commit(XY_PAGESIZE - _tx_zs->avail_out);
         }
-        _writing_queue.push(make_shared<websocket_frame>(0x41,
-                chunk(sb.data(), sb.size() - 4)));
+        _strm->write(make_shared<websocket_frame>(0x41, chunk(sb.data(), sb.size() - 4)));
     } else {
-        _writing_queue.push(make_shared<websocket_frame>(1, str));
+        _strm->write(make_shared<websocket_frame>(1, str));
     }
-    if(_flush_paused)
-        _flush_thread->resume(); // Notify new queued message
 }
 
 void websocket::cleanup() {
     _alive = false;
-    if(_flush_paused) _flush_thread->resume();
     _reassembled.pull(_reassembled.size());
-    _flush_thread.reset();
     _strm.reset();
     if(_rx_zs) {
         inflateEnd(_rx_zs);
@@ -634,7 +606,6 @@ void websocket::cleanup() {
         delete _tx_zs;
         _tx_zs = nullptr;
     }
-
 }
 
 websocket::~websocket() { cleanup(); }

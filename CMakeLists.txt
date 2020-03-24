@@ -7,7 +7,10 @@ include(GoogleTest OPTIONAL)
 
 find_package(OpenSSL)
 find_package(ZLIB)
+find_package(PkgConfig)
+
 find_library(GTEST_LIBRARIES NAMES gtest gtest_main)
+pkg_search_module(LIBUV REQUIRED libuv)
 
 include_directories(include)
 set(HEADER_FILES
@@ -20,7 +23,6 @@ set(HEADER_FILES
         include/xyhttptls.h
         include/xystream.h
         include/xytlsstream.h
-        include/xywebsocket.h
         )
 set(SOURCE_FILES
         src/httpcore/xybase64.cpp
@@ -36,7 +38,7 @@ set(SOURCE_FILES
         src/httpcore/xytlsstream.cpp
         )
 add_library(iocore ${SOURCE_FILES} ${HEADER_FILES})
-target_link_libraries(iocore uv ${ZLIB_LIBRARIES} ${OPENSSL_LIBRARIES})
+target_link_libraries(iocore ${LIBUV_LIBRARIES} ${ZLIB_LIBRARIES} ${OPENSSL_LIBRARIES})
 
 add_executable(tinyhttpd src/tinyhttpd/tinyhttpd.cpp)
 target_link_libraries(tinyhttpd iocore)
