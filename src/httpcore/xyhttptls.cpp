@@ -240,19 +240,18 @@ void https_server::use_certificate(const char *file, const char *key) {
 static void https_server_on_connection(uv_stream_t* strm, int status) {
     https_server *self = (https_server *)strm->data;
     if(status >= 0) {
-        tls_stream *client = new tls_stream(*self->ctx());
+        P<tls_stream> client = make_shared<tls_stream>(*self->ctx());
         try {
             client->accept(strm);
             client->nodelay(true);
+            // See comments in http_server_on_connection() from xyhttp.cpp
+            P<ip_endpoint> peer = client->getpeername();
+            fiber::launch(bind(&https_server::service_loop, self,
+                               make_shared<http_connection>(client, peer->straddr())));
         }
         catch(exception &ex) {
-            delete client;
-            cerr<<ex.what()<<endl;
             return;
         }
-        auto connection = make_shared<http_connection>(
-                shared_ptr<stream>(client), client->getpeername()->straddr());
-        fiber::launch(bind(&https_server::service_loop, self, connection));
     }
 }
 

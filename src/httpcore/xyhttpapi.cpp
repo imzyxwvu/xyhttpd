@@ -51,13 +51,13 @@ http_transaction::~http_transaction() {
 }
 
 void http_transaction::forward_to(const string &host, int port) {
-    return forward_to(make_shared<ip_endpoint>(host, port));
+    auto upstream = make_shared<tcp_stream>();
+    upstream->connect(host, port);
+    return forward_to(upstream);
 }
 
-void http_transaction::forward_to(shared_ptr<ip_endpoint> ep) {
+void http_transaction::forward_to(P<stream> strm) {
     if(header_sent()) throw RTERR("header already sent");
-    auto strm = make_shared<tcp_stream>();
-    strm->connect(ep);
     auto req = make_shared<http_request>(*request);
     req->set_header("X-Forwarded-For", connection->_peername);
     strm->write(req);
@@ -94,7 +94,7 @@ void http_transaction::forward_to(shared_ptr<ip_endpoint> ep) {
     finish();
 }
 
-void http_transaction::forward_to(shared_ptr<fcgi_connection> conn) {
+void http_transaction::forward_to(P<fcgi_connection> conn) {
     conn->set_env("PATH_INFO", request->path());
     conn->set_env("SERVER_PROTOCOL", "HTTP/1.1");
     conn->set_env("CONTENT_TYPE", request->header("content-type"));
@@ -265,10 +265,12 @@ void http_transaction::redirect_to(const string &dest) {
 
 void http_transaction::display_error(int code) {
     auto resp = get_response(code);
-    resp->set_header("Content-Type", "text/html");
-    write(fmt("<html><head><title>XWSG Error %d</title></head>"
-              "<body><h1>%d %s</h1></body></html>", code, code,
-              http_response::state_description(code)));
+    if(_transfer_mode == UNDECIDED && _tx_buffer.size() == 0) {
+        resp->set_header("Content-Type", "text/html");
+        write(fmt("<html><head><title>XWSG Error %d</title></head>"
+                  "<body><h1>%d %s</h1></body></html>", code, code,
+                  http_response::state_description(code)));
+    }
     finish();
 }
 

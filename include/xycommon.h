@@ -83,6 +83,7 @@ public:
 
     inline chunk &operator=(const std::string &str) {
         *this = std::move(chunk(str));
+        return *this;
     }
 
     inline chunk &operator=(const char *str) {

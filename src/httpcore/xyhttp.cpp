@@ -103,18 +103,22 @@ http_server::http_server(http_service *svc)
 static void http_server_on_connection(uv_stream_t* strm, int status) {
     http_server *self = (http_server *)strm->data;
     if(status >= 0) {
-        tcp_stream *client = new tcp_stream();
+        P<tcp_stream> client = make_shared<tcp_stream>();
         try {
             client->accept(strm);
             client->nodelay(true);
+            /*
+             * Some sockets may have received RST frames before we accept them.
+             * getpeername() on these sockets leads to ENOTCONN exceptions, which
+             * may help filtering reset sockets.
+             */
+            P<ip_endpoint> peer = client->getpeername();
+            fiber::launch(bind(&http_server::service_loop, self,
+                               make_shared<http_connection>(client, peer->straddr())));
         }
         catch(exception &ex) {
-            delete client;
             return;
         }
-        auto connection = make_shared<http_connection>(
-                shared_ptr<stream>(client), client->getpeername()->straddr());
-        fiber::launch(bind(&http_server::service_loop, self, connection));
     }
 }
 
@@ -290,10 +294,10 @@ void http_request::set_resource(chunk res) {
     _resource = move(res);
     const char *queryBase = strchr(_resource.data(), '?');
     if(queryBase) {
-        _path = string(_resource.data(), queryBase - _resource.data());
+        _path = url_decode(_resource.data(), queryBase - _resource.data());
         _query = chunk(queryBase + 1);
     } else {
-        _path = _resource.to_string();
+        _path = url_decode(_resource.data(), _resource.size());
         _query = nullptr;
     }
 }
@@ -317,6 +321,30 @@ unordered_map<string, chunk>::const_iterator http_request::hend() const {
 }
 
 http_request::decoder::~decoder() {}
+
+std::string http_request::url_decode(const char *buf, int siz) {
+    string result;
+    char hexstr[3];
+    hexstr[2] = 0;
+    result.reserve(siz);
+    while(--siz >= 0) {
+        unsigned char in = *buf;
+        if ('%' == in && siz >= 2 &&
+            isxdigit(buf[1]) && isxdigit(buf[2])) {
+            // this is two hexadecimal digits following a '%'
+            hexstr[0] = buf[1], hexstr[1] = buf[2];
+            unsigned int hex = strtoul(hexstr, nullptr, 16);
+            in = (unsigned char) hex; // this long is never bigger than 255 anyway
+            buf += 2;
+            siz -= 2;
+        }
+        else if('+' == in)
+            in = ' ';
+        result.push_back(in);
+        buf++;
+    }
+    return result;
+}
 
 const char* http_response::state_description(int code) {
     switch(code) {

@@ -257,8 +257,9 @@ void proxy_pass_service::serve(http_trx &tx) {
         return;
     if(_cur >= count())
         _cur = 0;
-    shared_ptr<ip_endpoint> ep = _svcs[_cur++];
-    tx->forward_to(ep);
+    auto upstream = make_shared<tcp_stream>();
+    upstream->connect(_svcs[_cur++]);
+    tx->forward_to(upstream);
 }
 
 lambda_service::lambda_service(const function<void(http_trx &)> &func)

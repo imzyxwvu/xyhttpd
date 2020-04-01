@@ -291,6 +291,10 @@ TEST(IO, HttpServer) {
     chain->route<lambda_service>("/throw", [] (http_trx &tx) {
         throw runtime_error("expected error");
     });
+    chain->route<lambda_service>("/中文URI测试", [] (http_trx &tx) {
+        tx->write("OK");
+        tx->finish();
+    });
     chain->route<lambda_service>("/large-data", [] (http_trx &tx) {
         for(int i = 0; i < 16384; i++)
             tx->write("abcdefghAbcdefghabcdEfghABCDEFGH");
@@ -338,6 +342,16 @@ TEST(IO, HttpServer) {
         ASSERT_TRUE(resp->header("Connection") == "keep-alive");
         content_decoder = make_shared<http_transfer_decoder>(resp);
         while(content_decoder->more()) client->read(content_decoder);
+
+        // escaped URI would also work
+        req->set_resource("/%E4%B8%AD%E6%96%87URI%E6%B5%8B%E8%AF%95");
+        client->write(req);
+        resp = client->read<http_response>(response_decoder);
+        ASSERT_EQ(resp->code(), 200);
+        ASSERT_TRUE(resp->header("Connection") == "keep-alive");
+        content_decoder = make_shared<http_transfer_decoder>(resp);
+        while(content_decoder->more()) client->read(content_decoder);
+        ASSERT_EQ(memcmp(sb_content.data(), "OK", sb_content.size()), 0);
 
         // Test chunked Transfer-Encoding
         req->set_resource("/large-data");

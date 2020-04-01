@@ -16,7 +16,7 @@ public:
     http_request() = default;
     inline chunk resource() const { return _resource; }
     void set_resource(chunk res);
-    inline std::string path() const { return _path; }
+    inline const std::string &path() const { return _path; }
     inline chunk query() const { return _query; }
     inline chunk header(const std::string &key) {
         auto it = _headers.find(key);
@@ -40,6 +40,8 @@ public:
         virtual bool decode(stream_buffer &stb);
         virtual ~decoder();
     };
+
+    static std::string url_decode(const char *buf, int siz);
 private:
     chunk _resource, _query;
     std::string _path;
@@ -103,7 +105,7 @@ public:
     void serve_file(const std::string &filename);
     void serve_file(const std::string &filename, struct stat &info);
     void forward_to(const std::string &hostname, int port);
-    void forward_to(P<ip_endpoint> ep);
+    void forward_to(P<stream> strm);
     void forward_to(P<fcgi_connection> conn);
     void redirect_to(const std::string &dest);
     void display_error(int code);
