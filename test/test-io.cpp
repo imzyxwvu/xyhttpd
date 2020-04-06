@@ -319,7 +319,7 @@ TEST(IO, HttpServer) {
         ASSERT_TRUE(resp->header("Connection") == "keep-alive");
         auto content_decoder = make_shared<http_transfer_decoder>(resp);
         while(content_decoder->more())
-            sb_content.append(client->read(content_decoder));
+            sb_content.append(client->read<string_message>(content_decoder));
         ASSERT_EQ(memcmp(sb_content.data(), "Hello world", sb_content.size()), 0);
         sb_content.pull(sb_content.size());
 
@@ -330,7 +330,7 @@ TEST(IO, HttpServer) {
         ASSERT_TRUE(resp->header("Connection") == "keep-alive");
         content_decoder = make_shared<http_transfer_decoder>(resp);
         while(content_decoder->more())
-            sb_content.append(client->read(content_decoder));
+            sb_content.append(client->read<string_message>(content_decoder));
         ASSERT_EQ(memcmp(sb_content.data(), "Hello world", sb_content.size()), 0);
         sb_content.pull(sb_content.size());
 
@@ -362,7 +362,7 @@ TEST(IO, HttpServer) {
         ASSERT_TRUE(resp->header("Transfer-Encoding"));
         content_decoder = make_shared<http_transfer_decoder>(resp);
         while(content_decoder->more())
-            sb_content.append(client->read(content_decoder));
+            sb_content.append(client->read<string_message>(content_decoder));
         ASSERT_EQ(sb_content.size(), 16384 * 32);
         sb_content.pull(sb_content.size());
 
@@ -376,7 +376,7 @@ TEST(IO, HttpServer) {
         ASSERT_TRUE(resp->header("Content-Encoding"));
         content_decoder = make_shared<http_transfer_decoder>(resp);
         while(content_decoder->more())
-            sb_content.append(client->read(content_decoder));
+            sb_content.append(client->read<string_message>(content_decoder));
         ASSERT_LT(sb_content.size(), 8192);
         sb_content.pull(sb_content.size());
 
@@ -386,6 +386,75 @@ TEST(IO, HttpServer) {
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
     ASSERT_TRUE(checkpoint_finished);
     ASSERT_TRUE(checkpoint_forward);
+    // Give fibers a chance to finish
+    uv_run(uv_default_loop(), UV_RUN_NOWAIT);
+
+    // Check resource release
+    int handle_count = 0;
+    uv_walk(uv_default_loop(), handle_walker, &handle_count);
+    ASSERT_EQ(handle_count, 1); // Should be the tcp server
+}
+
+TEST(IO, HttpClient) {
+    auto chain = make_shared<http_service_chain>();
+    http_server server(chain);
+    chain->route<lambda_service>("/hello", [] (http_trx &tx) {
+        tx->write("Hello world");
+        tx->finish();
+    });
+    chain->route<lambda_service>("/large-data", [] (http_trx &tx) {
+        for(int i = 0; i < 16384; i++)
+            tx->write("abcdefghAbcdefghabcdEfghABCDEFGH");
+        tx->finish();
+    });
+    server.listen("127.0.0.1", TEST_BIND_PORT);
+
+    bool checkpoint_finished = false;
+    fiber::launch([&checkpoint_finished] () {
+        auto client_stream = make_shared<tcp_stream>();
+        client_stream->connect("127.0.0.1", TEST_BIND_PORT);
+        auto client = make_shared<http_client>(client_stream);
+        stream_buffer sb_content;
+        auto req = make_shared<http_request>();
+        req->set_header("Connection", "keep-alive");
+        req->set_header("Host", "localhost");
+
+        req->set_resource("/hello");
+        auto resp = client->send(req);
+        ASSERT_EQ(resp->code(), 200);
+        ASSERT_TRUE(resp->header("Connection") == "keep-alive");
+        while(client->data_available()) {
+            chunk data = client->read();
+            sb_content.append(data.data(), data.size());
+        }
+        ASSERT_EQ(memcmp(sb_content.data(), "Hello world", sb_content.size()), 0);
+        sb_content.pull(sb_content.size());
+        ASSERT_TRUE(client->reusable());
+
+        // Test chunked Transfer-Encoding
+        req->set_resource("/large-data");
+        resp = client->send(req);
+        ASSERT_EQ(resp->code(), 200);
+        while(client->data_available()) {
+            chunk data = client->read();
+            sb_content.append(data.data(), data.size());
+        }
+        ASSERT_EQ(sb_content.size(), 16384 * 32);
+        sb_content.pull(sb_content.size());
+        ASSERT_TRUE(client->reusable());
+
+        // Connection: close should lead http_client to be not reusable
+        req->set_header("Connection", "close");
+        req->set_resource("/hello");
+        resp = client->send(req);
+        while(client->data_available()) client->read();
+        ASSERT_FALSE(client->reusable());
+
+        uv_stop(uv_default_loop());
+        checkpoint_finished = true;
+    });
+    uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+    ASSERT_TRUE(checkpoint_finished);
     // Give fibers a chance to finish
     uv_run(uv_default_loop(), UV_RUN_NOWAIT);
 

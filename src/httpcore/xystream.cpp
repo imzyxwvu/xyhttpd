@@ -105,28 +105,17 @@ stream_buffer::~stream_buffer() {
 
 decoder::~decoder() {}
 
-string_message::string_message(const string &s) : _size(s.size()) {
-    _buffer = (char *)malloc(_size);
-    if(!_buffer)
-        throw std::bad_alloc();
-    memcpy(_buffer, s.data(), _size);
-}
-
-string_message::string_message(char *buf, size_t len)
-        : _buffer(buf), _size(len) {}
+string_message::string_message(const char *buf, size_t len) : _data(buf, len) {}
 
 int string_message::serialize_size() {
-    return _size;
+    return _data.size();
 }
 
 void string_message::serialize(char *buf) {
-    memcpy(buf, _buffer, _size);
+    memcpy(buf, _data.data(), _data.size());
 }
 
-string_message::~string_message() {
-    free(_buffer);
-    _size = 0;
-}
+string_message::~string_message() = default;
 
 string_decoder::string_decoder(int bytesToRead)
         : _nBytes(0), _restBytes(bytesToRead) {}
@@ -136,17 +125,14 @@ bool string_decoder::decode(stream_buffer &stb) {
         return false;
     _nBytes = stb.size();
     if(_restBytes == -1) {
-        _msg = make_shared<string_message>(stb.detach(), _nBytes);
-        return true;
-    } else if(stb.size() <= _restBytes) {
-        _msg = make_shared<string_message>(stb.detach(), _nBytes);
-    } else {
-        _nBytes = _restBytes;
-        char *buffer = (char *)malloc(_nBytes);
-        memcpy(buffer, stb.data(), _nBytes);
-        _msg = make_shared<string_message>(buffer, _nBytes);
+        _msg = make_shared<string_message>(stb.data(), _nBytes);
         stb.pull(_nBytes);
+        return true;
     }
+    if(_nBytes > _restBytes)
+        _nBytes = _restBytes;
+    _msg = make_shared<string_message>(stb.data(), _nBytes);
+    stb.pull(_nBytes);
     _restBytes -= _nBytes;
     return true;
 }
@@ -230,20 +216,16 @@ public:
     }
 };
 
-shared_ptr<message> stream::read(const shared_ptr<decoder> &decoder) {
+void stream::read(const shared_ptr<decoder> &decoder) {
     if(reading_fiber || _pipe_sink)
         throw RTERR("stream is read-busy");
-    if(buffer.size() > 0)
-        if(decoder->decode(buffer))
-            return decoder->msg();
+    if(buffer.size() > 0 && decoder->decode(buffer))
+        return;
     _decoder = decoder;
     int status = _do_read();
     _decoder.reset();
-    if(status >= 0) {
-        return decoder->msg();
-    } else {
+    if(status < 0)
         throw IOERR(status);
-    }
 }
 
 static void stream_on_write(uv_write_t *req, int status)

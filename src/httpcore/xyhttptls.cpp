@@ -82,13 +82,12 @@ void tls_stream::_commit_rx(char *base, int nread) {
     reading_fiber->resume(nread);
 }
 
-shared_ptr<message> tls_stream::read(const shared_ptr<decoder> &decoder) {
+void tls_stream::read(const shared_ptr<decoder> &decoder) {
     if(reading_fiber) throw RTERR("stream is read-busy");
     do_handshake();
     if(!_ssl) return stream::read(decoder);
-    if(buffer.size() > 0)
-        if(decoder->decode(buffer))
-            return decoder->msg();
+    if(buffer.size() > 0 && decoder->decode(buffer))
+        return;
     while(true) {
         char *buf = buffer.prepare(0x8000);
         int nread = SSL_read(_ssl, buf, 0x8000);
@@ -99,14 +98,9 @@ shared_ptr<message> tls_stream::read(const shared_ptr<decoder> &decoder) {
             else
                 throw RTERR("TLS error: %s", sslerror_to_string(nread));
         } else if(nread > 0) {
-            try {
-                buffer.commit(nread);
-                if(decoder->decode(buffer))
-                    return decoder->msg();
-            }
-            catch(exception &ex) {
-                throw RTERR("Protocol Error: %s", ex.what());
-            }
+            buffer.commit(nread);
+            if(decoder->decode(buffer))
+                return;
         } else
             handle_want(SSL_ERROR_WANT_READ);
     }

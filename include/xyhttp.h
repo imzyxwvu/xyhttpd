@@ -10,6 +10,8 @@
 #include <uv.h>
 #include <vector>
 
+using http_header_map = std::unordered_map<std::string, chunk>;
+
 class http_request : public message {
 public:
     std::string method;
@@ -27,13 +29,15 @@ public:
         _headers[key] = std::move(val);
     }
     void delete_header(const std::string &key);
+
+    http_request &operator=(const http_request &) = delete;
     virtual ~http_request();
 
     virtual int serialize_size();
     virtual void serialize(char *buf);
 
-    std::unordered_map<std::string, chunk>::const_iterator hbegin() const;
-    std::unordered_map<std::string, chunk>::const_iterator hend() const;
+    http_header_map::const_iterator hbegin() const { return _headers.begin(); }
+    http_header_map::const_iterator hend() const { return _headers.end(); }
 
     class decoder : public ::decoder {
     public:
@@ -45,9 +49,7 @@ public:
 private:
     chunk _resource, _query;
     std::string _path;
-    std::unordered_map<std::string, chunk> _headers;
-
-    http_request &operator=(const http_request &);
+    http_header_map _headers;
 };
 
 class http_response : public message {
@@ -64,12 +66,15 @@ public:
     void set_code(int newcode);
     void set_header(const std::string &key, chunk val);
     void delete_header(const std::string &key);
+    http_header_map::const_iterator hbegin() const { return _headers.begin(); }
+    http_header_map::const_iterator hend() const { return _headers.end(); }
     static const char *state_description(int code);
 
     virtual int serialize_size();
     virtual void serialize(char *buf);
     
     explicit http_response(int code);
+    http_response(const http_response &) = delete;
     virtual ~http_response();
 
     class decoder : public ::decoder {
@@ -79,9 +84,7 @@ public:
     };
 private:
     int _code;
-    std::unordered_map<std::string, chunk> _headers;
-
-    http_response &operator=(const http_response &);
+    http_header_map _headers;
 };
 
 class http_transfer_decoder : public string_decoder {
@@ -173,6 +176,23 @@ public:
     http_server &operator=(const http_server &) = delete;
 protected:
     uv_tcp_t *_server;
+};
+
+class http_client {
+public:
+    explicit http_client(P<stream> strm);
+    chunk read();
+    P<http_response> send(const P<http_request> &request);
+    inline bool data_available() const {
+        return _tsfr_decoder && _tsfr_decoder->more();
+    }
+    inline bool reusable() const { return _reusable; }
+    virtual ~http_client();
+private:
+    P<stream> _stream;
+    P<http_response::decoder> _resp_decoder;
+    P<http_transfer_decoder> _tsfr_decoder;
+    bool _reusable;
 };
 
 class websocket_frame : public message {

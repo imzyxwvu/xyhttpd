@@ -35,7 +35,7 @@ public:
     decoder() = default;
     decoder(const decoder &) = delete;
     virtual bool decode(stream_buffer &stb) = 0;
-    inline P<message> msg() { return _msg; }
+    inline P<message> msg() { return std::move(_msg); }
     virtual ~decoder() = 0;
 protected:
     P<message> _msg;
@@ -43,17 +43,15 @@ protected:
 
 class string_message : public message {
 public:
-    string_message(char *buf, size_t len);
-    explicit string_message(const std::string &str);
-    inline chunk str() { return chunk(_buffer, _size); }
-    inline const char *data() { return _buffer; }
+    string_message(const char *buf, size_t len);
+    inline chunk &str() { return _data; }
+    inline const char *data() { return _data.data(); }
     virtual ~string_message();
 
     virtual int serialize_size();
     virtual void serialize(char *buf);
 private:
-    char *_buffer;
-    size_t _size;
+    chunk _data;
 };
 
 class string_decoder : public decoder {
@@ -86,12 +84,7 @@ public:
     friend class callbacks;
 
     virtual void accept(uv_stream_t *);
-    template<class T>
-    inline P<T> read(const P<decoder> &dec) {
-        auto msg = read(dec);
-        return msg ? std::dynamic_pointer_cast<T>(msg) : nullptr;
-    }
-    virtual P<message> read(const P<decoder> &dec);
+    virtual void read(const P<decoder> &dec);
     virtual void write(const char *buf, int length);
     virtual void pipe(const P<stream> &sink);
     virtual bool has_tls();
@@ -100,6 +93,12 @@ public:
     void shutdown();
     void set_timeout(int timeout);
     virtual ~stream();
+
+    template<class T>
+    inline P<T> read(const P<decoder> &dec) {
+        (void)read(dec);
+        return std::dynamic_pointer_cast<T>(dec->msg());
+    }
 protected:
     int _do_read();
     virtual void _commit_rx(char *base, int nread);

@@ -1,6 +1,7 @@
 #include <cstring>
 #include <sstream>
 #include <iostream>
+#include <utility>
 #include "xyfcgi.h"
 
 using namespace std;
@@ -25,44 +26,32 @@ bool fcgi_message::decoder::decode(stream_buffer &stb) {
     return false;
 }
 
-fcgi_message::decoder::~decoder() {
-}
+fcgi_message::decoder::~decoder() = default;
 
 fcgi_message::fcgi_message(fcgi_message::message_type t, int requestId)
-        : _type(t), _request_id(requestId), _payload(nullptr), _payload_length(0) {}
+        : _type(t), _request_id(requestId) {}
 
 fcgi_message::fcgi_message(fcgi_message::message_type t, int requestId, const char *data, int len)
-    : _type(t), _request_id(requestId), _payload(nullptr), _payload_length(len) {
-    if(len > 0) {
-        if(!data)
-            throw RTERR("payload length was set but payload is NULL");
-        _payload = new char[len];
-        memcpy(_payload, data, _payload_length);
-    }
-}
+    : _type(t), _request_id(requestId), _payload(data, len) {}
 
-fcgi_message::~fcgi_message() {
-    if(_payload) {
-        delete[] _payload;
-    }
-}
+fcgi_message::~fcgi_message() = default;
 
 void fcgi_message::serialize(char *buf) {
-    unsigned char *hdr = (unsigned char *)buf;
+    auto *hdr = (unsigned char *)buf;
     hdr[0] = 1; // FCGI_VERSION_1
     hdr[1] = _type;
     hdr[2] = (_request_id >> 8) & 0xff;
     hdr[3] = _request_id & 0xff;
-    hdr[4] = (_payload_length >> 8) & 0xff;
-    hdr[5] = _payload_length & 0xff;
+    hdr[4] = (_payload.size() >> 8) & 0xff;
+    hdr[5] = _payload.size() & 0xff;
     hdr[6] = 0;
     hdr[7] = 0;
     if(_payload)
-        memcpy(buf + 8, _payload, _payload_length);
+        memcpy(buf + 8, _payload.data(), _payload.size());
 }
 
 int fcgi_message::serialize_size() {
-    return 8 + length();
+    return 8 + _payload.size();
 }
 
 chunk fcgi_connection::get_env(const std::string &key) {
@@ -73,15 +62,15 @@ shared_ptr<fcgi_message> fcgi_message::make_dummy(fcgi_message::message_type t) 
     return make_shared<fcgi_message>(t, 0);
 }
 
-fcgi_connection::fcgi_connection(const shared_ptr<stream> &strm, int roleId)
-	: _strm(strm), _envready(false) {
+fcgi_connection::fcgi_connection(P<stream> strm, int roleId)
+	: _strm(move(strm)), _env_sent(false), _decoder(make_shared<fcgi_message::decoder>()) {
     unsigned char requestBegin[8] = { 0, (unsigned char)roleId, 0, 0, 0, 0, 0, 0};
     _strm->write(make_shared<fcgi_message>(
             fcgi_message::message_type::FCGI_BEGIN_REQUEST, 0, (char *)requestBegin, 8));
 }
 
 void fcgi_connection::set_env(const string &key, chunk val) {
-    if(_envready)
+    if(_env_sent)
         throw RTERR("environment variables already sent");
     if(!val) return;
     _env[key] = move(val);
@@ -101,7 +90,7 @@ static void append_length_bytes(stringstream &ss, int len) {
 }
 
 void fcgi_connection::flush_env() {
-    if(_envready) return;
+    if(_env_sent) return;
     stringstream ss;
     for(auto it = _env.cbegin(); it != _env.cend(); it++) {
         if(!it->second) continue;
@@ -113,7 +102,7 @@ void fcgi_connection::flush_env() {
     _strm->write(make_shared<fcgi_message>(
             fcgi_message::message_type::FCGI_PARAMS, 0, ss.str().data(), ss.str().size()));
     _strm->write(fcgi_message::make_dummy(fcgi_message::message_type::FCGI_PARAMS));
-    _envready = true;
+    _env_sent = true;
 }
 
 void fcgi_connection::write(const char *data, int len) {
@@ -125,25 +114,15 @@ void fcgi_connection::write(const chunk &msg) {
     write(msg.data(), msg.size());
 }
 
-shared_ptr<message> fcgi_connection::read(shared_ptr<decoder> decoder) {
+chunk fcgi_connection::read() {
     flush_env();
-    if(decoder->decode(_buffer))
-        return decoder->msg();
     while(true) {
-        auto msg = _strm->read<fcgi_message>(make_shared<fcgi_message::decoder>());
+        auto msg = _strm->read<fcgi_message>(_decoder);
         switch(msg->msgtype()) {
             case fcgi_message::message_type::FCGI_STDOUT:
-                _buffer.append(msg->data(), msg->length());
-                try {
-                    if(decoder->decode(_buffer))
-                        return decoder->msg();
-                }
-                catch(exception &ex) {
-                    throw RTERR("Protocol Error: %s", ex.what());
-                }
-                break;
+                return msg->data();
             case fcgi_message::message_type::FCGI_STDERR:
-                cerr.write(msg->data(), msg->length());
+                cerr.write(msg->data().data(), msg->data().size());
                 break;
             case fcgi_message::message_type::FCGI_END_REQUEST:
                 return nullptr;

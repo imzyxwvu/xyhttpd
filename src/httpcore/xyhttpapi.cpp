@@ -115,12 +115,28 @@ void http_transaction::forward_to(P<fcgi_connection> conn) {
         conn->set_env(envKeyBuf, it->second);
     }
     if(postdata) conn->write(postdata);
-    _response = conn->read<http_response>(make_shared<http_response::decoder>());
-    auto dec = make_shared<string_decoder>();
+    stream_buffer responseBuffer;
     while(true) {
-        auto msg = conn->read<string_message>(dec);
+        chunk data = conn->read();
+        if(!data) {
+            display_error(502);
+            return;
+        }
+        responseBuffer.append(data.data(), data.size());
+        auto respDecoder = make_shared<http_response::decoder>();
+        if(respDecoder->decode(responseBuffer)) {
+            _response = dynamic_pointer_cast<http_response>(respDecoder->msg());
+            break;
+        }
+    }
+    if(responseBuffer.size() > 0) {
+        write(responseBuffer.data(), responseBuffer.size());
+        responseBuffer.pull(responseBuffer.size());
+    }
+    while(true) {
+        auto msg = conn->read();
         if(!msg) break;
-        write(msg->data(), msg->serialize_size());
+        write(msg.data(), msg.size());
     }
     finish();
 }

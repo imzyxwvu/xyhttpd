@@ -312,14 +312,6 @@ bool http_request::header_include(const string &key, const string &kw) {
     return it->second.find(kw.c_str()) != -1;
 }
 
-unordered_map<string, chunk>::const_iterator http_request::hbegin() const {
-    return _headers.cbegin();
-}
-
-unordered_map<string, chunk>::const_iterator http_request::hend() const {
-    return _headers.cend();
-}
-
 http_request::decoder::~decoder() {}
 
 std::string http_request::url_decode(const char *buf, int siz) {
@@ -570,9 +562,7 @@ bool http_transfer_decoder::decode(stream_buffer &stb) {
                 _msg = make_shared<string_message>(nullptr, 0);
                 return true;
             }
-            char *buffer = (char *)malloc(_nBytes);
-            memcpy(buffer, end + 2, _nBytes);
-            _msg = make_shared<string_message>(buffer, _nBytes);
+            _msg = make_shared<string_message>(end + 2, _nBytes);
             stb.pull(chunkSize);
             return true;
         }
@@ -581,3 +571,40 @@ bool http_transfer_decoder::decode(stream_buffer &stb) {
         return string_decoder::decode(stb);
     }
 }
+
+http_client::http_client(P<stream> strm) : _stream(move(strm)),
+                                           _resp_decoder(make_shared<http_response::decoder>()), _reusable(true) {}
+
+P<http_response> http_client::send(const P<http_request> &request) {
+    if(data_available())
+        throw RTERR("pending response for last request");
+    if(!_reusable)
+        throw RTERR("connection is over");
+    try {
+        _stream->write(request);
+        auto response = _stream->read<http_response>(_resp_decoder);
+        auto connection = response->header("Connection");
+        if(!connection || (
+                connection.find("keep-alive") == -1 &&
+                connection.find("Keep-Alive") == -1))
+            _reusable = false;
+        _tsfr_decoder = make_shared<http_transfer_decoder>(response);
+        return response;
+    }
+    catch(runtime_error &ex) {
+        _reusable = false;
+        throw;
+    }
+}
+
+chunk http_client::read() {
+    if(!data_available())
+        throw RTERR("read on unreadable HTTP client connection");
+
+    auto msg = _stream->read<string_message>(_tsfr_decoder);
+    if(!_tsfr_decoder->more()) // Response is over
+        _tsfr_decoder.reset();
+    return msg->str();
+}
+
+http_client::~http_client() = default;

@@ -31,7 +31,7 @@ public:
     virtual ~tls_stream();
 
     virtual void connect(const std::string &host, int port);
-    virtual P<message> read(const P<decoder> &);
+    virtual void read(const P<decoder> &);
     virtual void write(const char *buf, int length);
     virtual void accept(uv_stream_t *);
     virtual bool has_tls();

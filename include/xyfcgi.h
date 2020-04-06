@@ -20,18 +20,9 @@ public:
     fcgi_message(message_type t, int requestId, const char *data, int len);
     ~fcgi_message();
 
-    inline message_type msgtype() const {
-        return _type;
-    }
-    inline char *data() {
-        return _payload;
-    }
-    inline int request_id() {
-        return _request_id;
-    }
-    inline int length() const {
-        return _payload_length;
-    }
+    inline message_type msgtype() const { return _type; }
+    inline const chunk &data() { return _payload; }
+    inline unsigned int request_id() { return _request_id; }
     virtual void serialize(char *buf);
     virtual int serialize_size();
     static P<fcgi_message> make_dummy(message_type t);
@@ -44,9 +35,8 @@ public:
     };
 private:
     message_type _type;
-    char *_payload;
-    int _payload_length;
-    int _request_id;
+    chunk _payload;
+    unsigned int _request_id;
 };
 
 class fcgi_connection {
@@ -55,21 +45,17 @@ public:
     chunk get_env(const std::string &key);
     void write(const char *data, int len);
     void write(const chunk &msg);
-    template<class T>
-    inline P<T> read(P<decoder> dec) {
-        return std::dynamic_pointer_cast<T>(read(move(dec)));
-    }
-    P<message> read(P<decoder> dec);
+    chunk read();
 
-    fcgi_connection(const P<stream> &strm, int roleId);
+    fcgi_connection(P<stream> strm, int roleId);
 private:
     fcgi_connection(const fcgi_connection &);
 
     void flush_env();
     std::unordered_map<std::string, chunk> _env;
+    bool _env_sent;
     P<stream> _strm;
-    bool _envready;
-    stream_buffer _buffer;
+    P<fcgi_message::decoder> _decoder;
 };
 
 class fcgi_provider { 
