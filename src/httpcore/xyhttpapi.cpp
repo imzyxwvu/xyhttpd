@@ -74,10 +74,9 @@ void http_transaction::forward_to(P<stream> strm) {
     }
     if(_response->header("Content-Encoding"))
         _noGzip = true; // Disable GZIP if upstream has already done compression
-    if (_response->code() == 101 && _response->header("Upgrade")) {
-        auto client = upgrade();
-        client->pipe(strm);
-        strm->pipe(client);
+    if (_response->code() == 101) {
+        _response->delete_header("Upgrade");
+        display_error(502);
         return;
     }
     else if (_response->code() != 204 && _response->code() != 304) {

@@ -115,9 +115,4 @@ private:
     std::function<void(P<websocket>)> _ws_func;
 };
 
-class connect_proxy : public http_service {
-public:
-    virtual void serve(http_trx &tx);
-};
-
 #endif

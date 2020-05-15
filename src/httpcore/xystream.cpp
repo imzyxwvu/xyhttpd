@@ -186,38 +186,10 @@ public:
             self->_commit_rx(buf->base, nread);
         }
     }
-
-    static void pump_on_shutdown(uv_shutdown_t* req, int status) {
-        stream *self = (stream *)req->data;
-        delete req;
-        auto pipe_sink = move(self->_pipe_src->_pipe_sink);
-        self->_pipe_src.reset();
-    }
-
-    static void pump_on_write(uv_write_t *req, int status)
-    {
-        stream *self = (stream *)req->data;
-        delete req;
-        if(status == 0) {
-            if(uv_read_start(self->_pipe_src->handle,
-                    callbacks::on_alloc, callbacks::on_data) < 0) {
-                uv_shutdown_t *req = new uv_shutdown_t;
-                req->data = self;
-                if(uv_shutdown(req, self->handle, callbacks::pump_on_shutdown) < 0) {
-                    delete req;
-                    auto pipe_sink = move(self->_pipe_src->_pipe_sink);
-                    self->_pipe_src.reset();
-                }
-            }
-        } else {
-            auto pipe_sink = move(self->_pipe_src->_pipe_sink);
-            self->_pipe_src.reset();
-        }
-    }
 };
 
 void stream::read(const shared_ptr<decoder> &decoder) {
-    if(reading_fiber || _pipe_sink)
+    if(reading_fiber)
         throw RTERR("stream is read-busy");
     if(buffer.size() > 0 && decoder->decode(buffer))
         return;
@@ -265,48 +237,23 @@ void stream::write(const chunk &str) {
 }
 
 void stream::_commit_rx(char *base, int nread) {
-    if(!_pipe_sink) {
-        if(nread < 0) {
+    if(nread < 0) {
+        reading_fiber->resume(nread);
+        return;
+    }
+    buffer.commit(nread);
+    try {
+        if(_decoder->decode(buffer)) {
             reading_fiber->resume(nread);
             return;
         }
-        buffer.commit(nread);
-        try {
-            if(_decoder->decode(buffer)) {
-                reading_fiber->resume(nread);
-                return;
-            }
-            if(_timeout > 0)
-                uv_timer_start(_timeOuter, callbacks::on_read_timeout, _timeout, 0);
-        }
-        catch(runtime_error &ex) {
-            uv_read_stop(handle);
-            _decoder.reset();
-            reading_fiber->raise(ex.what());
-        }
-    } else { // Stream is piped to another
+        if(_timeout > 0)
+            uv_timer_start(_timeOuter, callbacks::on_read_timeout, _timeout, 0);
+    }
+    catch(runtime_error &ex) {
         uv_read_stop(handle);
-        if(nread > 0) {
-            uv_buf_t wbuf;
-            wbuf.base = base;
-            wbuf.len = nread;
-            uv_write_t *wreq = new uv_write_t;
-            wreq->data = _pipe_sink.get();
-            if(uv_write(wreq, _pipe_sink->handle,
-                        &wbuf, 1, callbacks::pump_on_write) < 0) {
-                delete wreq;
-                auto pipe_src = move(_pipe_sink->_pipe_src);
-                _pipe_sink.reset();
-            }
-        } else {
-            uv_shutdown_t *req = new uv_shutdown_t;
-            req->data = _pipe_sink.get();
-            if(uv_shutdown(req, _pipe_sink->handle, callbacks::pump_on_shutdown) < 0) {
-                delete req;
-                auto pipe_src = move(_pipe_sink->_pipe_src);
-                _pipe_sink.reset();
-            }
-        }
+        _decoder.reset();
+        reading_fiber->raise(ex.what());
     }
 }
 
@@ -327,24 +274,6 @@ void stream::set_timeout(int timeout) {
     _timeout = timeout;
 }
 
-void stream::pipe(const shared_ptr<stream> &sink) {
-    if(reading_fiber) throw runtime_error("stream is read-busy");
-    if(sink->_pipe_src) throw runtime_error("sink stream already has a source");
-    if(has_tls() || sink->has_tls())
-        throw RTERR("pipe to TLS stream is not implemented");
-    if(buffer.size() > 0) {
-        sink->write(buffer.data(), buffer.size());
-        buffer.pull(buffer.size());
-    }
-    _pipe_sink = sink;
-    int r = uv_read_start(handle, callbacks::on_alloc, callbacks::on_data);
-    if(r < 0) {
-        _pipe_sink.reset();
-        throw IOERR(r);
-    }
-    _pipe_sink->_pipe_src = shared_from_this();
-}
-
 static void stream_on_shutdown(uv_shutdown_t* req, int status) {
     auto self = (stream::write_request *)req->data;
     shared_ptr<fiber> f = move(self->_fiber);
@@ -353,7 +282,6 @@ static void stream_on_shutdown(uv_shutdown_t* req, int status) {
 }
 
 void stream::shutdown() {
-    if(_pipe_src) throw runtime_error("stream is a sink");
     write_request *req = new write_request;
     int r = uv_shutdown(&req->shutdown_req, handle, stream_on_shutdown);
     if(r < 0) {

@@ -86,7 +86,6 @@ public:
     virtual void accept(uv_stream_t *);
     virtual void read(const P<decoder> &dec);
     virtual void write(const char *buf, int length);
-    virtual void pipe(const P<stream> &sink);
     virtual bool has_tls();
     void write(const P<message> &msg);
     void write(const chunk &str);
@@ -107,7 +106,6 @@ protected:
     int _timeout;
     stream_buffer buffer;
     P<decoder> _decoder;
-    P<stream> _pipe_src, _pipe_sink;
     stream();
 private:
     stream(const stream &);

@@ -216,20 +216,10 @@ TEST(IO, TcpStream) {
         checkpoint_finished = true;
     });
 
-    // Test pipe
-    tcp_server pipe_server("127.0.0.1", 19001);
-    pipe_server.serve([] (shared_ptr<stream> strm) {
-       auto remote = make_shared<tcp_stream>();
-       remote->connect("127.0.0.1", TEST_BIND_PORT);
-       strm->pipe(remote);
-       remote->pipe(strm);
-       ASSERT_ANY_THROW(remote->pipe(strm));
-    });
-
     // Client fiber
     fiber::launch([] () {
         auto strm = make_shared<tcp_stream>();
-        strm->connect("127.0.0.1", 19001);
+        strm->connect("127.0.0.1", TEST_BIND_PORT);
 
         string test_request_part1 =
                 "POST /test?hello=world HTTP/1.1\r\n"
@@ -253,14 +243,14 @@ TEST(IO, TcpStream) {
         uv_stop(uv_default_loop());
     });
     uv_run(uv_default_loop(), UV_RUN_DEFAULT);
-    ASSERT_TRUE(checkpoint_finished);
     // Give fibers a chance to finish
     uv_run(uv_default_loop(), UV_RUN_NOWAIT);
+    ASSERT_TRUE(checkpoint_finished);
 
     // Check resource release
     int handle_count = 0;
     uv_walk(uv_default_loop(), handle_walker, &handle_count);
-    ASSERT_EQ(handle_count, 2); // Should be the two tcp servers
+    ASSERT_EQ(handle_count, 1); // Should be the tcp servers
 }
 
 TEST(IO, TcpConnectFail) {

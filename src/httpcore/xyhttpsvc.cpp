@@ -280,22 +280,3 @@ void lambda_service::serve(http_trx &tx) {
     else if(_func)
         _func(tx);
 }
-
-void connect_proxy::serve(http_trx &tx) {
-    if(tx->request->method == "CONNECT") {
-        const char *path = tx->request->path().data();
-        const char *portBase = strchr(path, ':');
-        if(portBase == NULL) {
-            tx->display_error(403);
-            return;
-        }
-        string hostName = string(path, portBase - path);
-        auto endpoint = make_shared<ip_endpoint>(hostName, atoi(portBase));
-        auto remote = make_shared<tcp_stream>();
-        remote->connect(endpoint);
-        auto client = tx->upgrade(false);
-        client->write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        client->pipe(remote);
-        remote->pipe(client);
-    }
-}
