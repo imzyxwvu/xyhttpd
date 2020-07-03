@@ -113,7 +113,14 @@ void http_transaction::forward_to(P<fcgi_connection> conn) {
             *(dest++) = (*src == '-') ? '_' : toupper(*src);
         conn->set_env(envKeyBuf, it->second);
     }
-    if(postdata) conn->write(postdata);
+    if(postdata) {
+        int base = 0;
+        while(base < postdata.size()) {
+            int txsize = min<int>(0xFF00, postdata.size() - base);
+            conn->write(postdata.data() + base, txsize);
+            base += txsize;
+        }
+    }
     stream_buffer responseBuffer;
     while(true) {
         chunk data = conn->read();
