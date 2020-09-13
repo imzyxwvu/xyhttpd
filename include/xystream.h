@@ -75,10 +75,10 @@ public:
             uv_shutdown_t shutdown_req;
             uv_connect_t connect_req;
         };
-        P<fiber> _fiber;
+        continuation _cont;
     };
 
-    P<fiber> reading_fiber;
+    continuation read_cont;
 
     class callbacks;
     friend class callbacks;

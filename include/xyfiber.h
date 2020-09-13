@@ -12,55 +12,45 @@ typedef ucontext_t fiber_context_t;
 
 #include "xycommon.h"
 
-class fiber {
-private:
-#ifndef _WIN32
-    class stack_mem {
-    public:
-        explicit stack_mem(int _size);
-        stack_mem(const stack_mem &) = delete;
-        ~stack_mem();
-        inline void *base() { return _base; }
-        inline size_t size() { return _size; }
-    private:
-        char *_base;
-        size_t _size;
-    };
+class continuation;
 
-    P<stack_mem> _stack;
-    static std::queue<P<stack_mem>> stack_pool;
-#endif
-
+class fiber final {
 public:
-    class preserve {
-    public:
-        explicit preserve(P<fiber> &f);
-        ~preserve();
-    private:
-        P<fiber> &_f;
-    };
-
     fiber(const fiber &) = delete;
-    explicit fiber(std::function<void()>);
-    static int yield();
-    void resume(int event);
-    void raise(const std::string &ex);
-    static P<fiber> launch(std::function<void()>);
-    inline static P<fiber> current() {
-        return _current;
-    }
-    ~fiber();
+    fiber &operator=(const fiber &) = delete;
+    virtual ~fiber();
+    static int yield(continuation &);
+    static void launch(std::function<void()> entry,
+                       size_t stack_size = 0x200000);
+
 private:
-    static void wrapper(fiber *f);
-    fiber_context_t context;
-    int _event;
-    bool _terminated;
+    ucontext_t _context;
+    char *_stack;
+    size_t _stack_size;
+    static ucontext_t _main_context;
+
     std::function<void()> _entry;
-    P<fiber> self, _prev;
-    P<std::runtime_error> _err;
-    static std::shared_ptr<fiber> _current;
-    static fiber_context_t maincontext;
-    static int stack_pool_target;
+    bool _terminated;
+    fiber *_prev;
+    static fiber *_current;
+
+    fiber(std::function<void()> entry, size_t stack_size);
+    static void _wrapper(fiber *self);
+    friend class continuation;
+    void resume();
+};
+
+class continuation {
+public:
+    continuation();
+    continuation(const continuation &) = delete;
+    continuation &operator=(const continuation &) = delete;
+    void resume(int status);
+    inline operator bool() const { return _pending != nullptr; }
+private:
+    fiber *_pending;
+    int _resume_status;
+    friend class fiber;
 };
 
 #endif

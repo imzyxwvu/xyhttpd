@@ -12,58 +12,47 @@ static void handle_walker(uv_handle_t* handle, void* arg) {
 
 TEST(IO, FiberMultilevel) {
     bool checkpoints[10];
-    shared_ptr<fiber> f1, f2, f3;
+    continuation f1, f2, f3;
     for(int i = 0; i < sizeof(checkpoints) / sizeof(bool); i++)
         checkpoints[i] = false;
 
-    f1 = fiber::launch([&checkpoints, &f1] () {
+    fiber::launch([&] () {
         checkpoints[0] = true;
-        ASSERT_NO_THROW(fiber::yield());
-        ASSERT_EQ(fiber::current(), f1);
-        ASSERT_ANY_THROW(f1->resume(0)); // Test self resume
+        ASSERT_NO_THROW(fiber::yield(f1));
+        ASSERT_ANY_THROW(f1.resume(0)); // Test self resume
         checkpoints[3] = true;
-        ASSERT_ANY_THROW(fiber::yield());
+        ASSERT_EQ(fiber::yield(f1), 799);
         ASSERT_TRUE(checkpoints[4]);
         checkpoints[5] = true;
     });
     ASSERT_TRUE(checkpoints[0]);
 
-    f2 = fiber::launch([&checkpoints, f1] () {
+    fiber::launch([&] () {
         checkpoints[1] = true;
-        fiber::yield();
-        f1->resume(0); // Test multi-level resume
+        fiber::yield(f2);
+        f1.resume(0); // Test multi-level resume
         ASSERT_TRUE(checkpoints[3]);
         checkpoints[4] = true;
-        fiber::yield();
-        f1->raise("expected error"); // Test remote throw
+        fiber::yield(f2);
+        f1.resume(799);
         ASSERT_TRUE(checkpoints[5]);
         checkpoints[6] = true;
     });
     ASSERT_TRUE(checkpoints[1]);
 
-    f3 = fiber::launch([&checkpoints, f1, f2] () {
+    fiber::launch([&] () {
         checkpoints[2] = true;
-        fiber::yield();
-        f2->resume(0);
+        fiber::yield(f3);
+        f2.resume(0);
         ASSERT_TRUE(checkpoints[6]);
         checkpoints[7] = true;
     });
     ASSERT_TRUE(checkpoints[2]);
-
-    ASSERT_TRUE(!fiber::current());
-    f2->resume(0);
+    f2.resume(0);
     ASSERT_TRUE(checkpoints[4]);
-    f3->resume(0);
+    f3.resume(0);
     ASSERT_TRUE(checkpoints[7]);
-    ASSERT_ANY_THROW(f1->resume(0));
-
-    // Check resource release
-    ASSERT_EQ(f3.use_count(), 1);
-    f3.reset();
-    ASSERT_EQ(f2.use_count(), 1);
-    f2.reset();
-    ASSERT_EQ(f1.use_count(), 1);
-    f1.reset();
+    ASSERT_ANY_THROW(f1.resume(0));
 }
 
 TEST(IO, StreamBufferDecoding) {

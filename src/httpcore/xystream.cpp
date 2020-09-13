@@ -162,7 +162,6 @@ void stream::accept(uv_stream_t *svr) {
 
 stream::write_request::write_request() {
     write_req.data = this;
-    _fiber = fiber::current();
 }
 
 class stream::callbacks {
@@ -176,7 +175,7 @@ public:
     static void on_read_timeout(uv_timer_t* handle) {
         stream *self = (stream *)handle->data;
         uv_timer_stop(handle);
-        self->reading_fiber->resume(UV_ETIMEDOUT);
+        self->read_cont.resume(UV_ETIMEDOUT);
     }
 
     static void on_data(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
@@ -189,7 +188,7 @@ public:
 };
 
 void stream::read(const shared_ptr<decoder> &decoder) {
-    if(reading_fiber)
+    if(read_cont)
         throw RTERR("stream is read-busy");
     if(buffer.size() > 0 && decoder->decode(buffer))
         return;
@@ -203,9 +202,8 @@ void stream::read(const shared_ptr<decoder> &decoder) {
 static void stream_on_write(uv_write_t *req, int status)
 {
     auto *self = (stream::write_request *)req->data;
-    shared_ptr<fiber> f = move(self->_fiber);
+    self->_cont.resume(status);
     delete self;
-    f->resume(status);
 }
 
 void stream::write(const char *chunk, int length)
@@ -213,13 +211,13 @@ void stream::write(const char *chunk, int length)
     uv_buf_t buf;
     buf.base = (char *)chunk;
     buf.len = length;
-    write_request *wreq = new write_request;
+    auto *wreq = new write_request;
     int r = uv_write(&wreq->write_req, handle, &buf, 1, stream_on_write);
     if(r < 0) {
         delete wreq;
         throw IOERR(r);
     }
-    int status = fiber::yield();
+    int status = fiber::yield(wreq->_cont);
     if(status != 0)
         throw IOERR(status);
 }
@@ -238,34 +236,31 @@ void stream::write(const chunk &str) {
 
 void stream::_commit_rx(char *base, int nread) {
     if(nread < 0) {
-        reading_fiber->resume(nread);
+        read_cont.resume(nread);
         return;
     }
     buffer.commit(nread);
     try {
         if(_decoder->decode(buffer)) {
-            reading_fiber->resume(nread);
+            read_cont.resume(nread);
             return;
         }
         if(_timeout > 0)
             uv_timer_start(_timeOuter, callbacks::on_read_timeout, _timeout, 0);
     }
     catch(runtime_error &ex) {
-        uv_read_stop(handle);
         _decoder.reset();
-        reading_fiber->raise(ex.what());
+        read_cont.resume(UV_EINVAL);
     }
 }
 
 int stream::_do_read() {
     int r;
-    if(!fiber::current()) throw logic_error("outside-fiber read");
     if((r = uv_read_start(handle, callbacks::on_alloc, callbacks::on_data)) < 0)
         throw IOERR(r);
     if(_timeout > 0)
         uv_timer_start(_timeOuter, callbacks::on_read_timeout, _timeout, 0);
-    fiber::preserve p(reading_fiber);
-    int status = fiber::yield();
+    int status = fiber::yield(read_cont);
     uv_read_stop(handle);
     return status;
 }
@@ -276,19 +271,18 @@ void stream::set_timeout(int timeout) {
 
 static void stream_on_shutdown(uv_shutdown_t* req, int status) {
     auto self = (stream::write_request *)req->data;
-    shared_ptr<fiber> f = move(self->_fiber);
+    self->_cont.resume(status);
     delete self;
-    f->resume(status);
 }
 
 void stream::shutdown() {
-    write_request *req = new write_request;
+    auto *req = new write_request;
     int r = uv_shutdown(&req->shutdown_req, handle, stream_on_shutdown);
     if(r < 0) {
         delete req;
         throw IOERR(r);
     }
-    fiber::yield();
+    fiber::yield(req->_cont);
 }
 
 bool stream::has_tls() {
@@ -307,9 +301,8 @@ tcp_stream::tcp_stream() {
 
 static void stream_on_connect(uv_connect_t* req, int status) {
     auto self = (stream::write_request *)req->data;
-    shared_ptr<fiber> f = move(self->_fiber);
+    self->_cont.resume(status);
     delete self;
-    f->resume(status);
 }
 
 void tcp_stream::connect(const string &host, int port)
@@ -323,13 +316,13 @@ void tcp_stream::connect(shared_ptr<ip_endpoint> ep) {
 }
 
 void tcp_stream::connect(const sockaddr *sa) {
-    write_request *req = new write_request;
+    auto *req = new write_request;
     int r = uv_tcp_connect(&req->connect_req, (uv_tcp_t *)handle, sa, stream_on_connect);
     if(r < 0) {
         delete req;
         throw IOERR(r);
     }
-    int status = fiber::yield();
+    int status = fiber::yield(req->_cont);
     if(status != 0)
         throw IOERR(status);
 }
@@ -360,9 +353,9 @@ unix_stream::unix_stream() {
 
 void unix_stream::connect(const string &path)
 {
-    write_request *req = new write_request;
+    auto *req = new write_request;
     uv_pipe_connect(&req->connect_req, (uv_pipe_t *)handle, path.c_str(), stream_on_connect);
-    int status = fiber::yield();
+    int status = fiber::yield(req->_cont);
     if(status != 0)
         throw IOERR(status);
 }

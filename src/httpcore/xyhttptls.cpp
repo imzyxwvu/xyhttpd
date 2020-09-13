@@ -79,11 +79,11 @@ void tls_stream::_commit_rx(char *base, int nread) {
             _ssl = nullptr;
         }
     }
-    reading_fiber->resume(nread);
+    read_cont.resume(nread);
 }
 
 void tls_stream::read(const shared_ptr<decoder> &decoder) {
-    if(reading_fiber) throw RTERR("stream is read-busy");
+    if(read_cont) throw RTERR("stream is read-busy");
     do_handshake();
     if(!_ssl) return stream::read(decoder);
     if(buffer.size() > 0 && decoder->decode(buffer))
@@ -107,7 +107,6 @@ void tls_stream::read(const shared_ptr<decoder> &decoder) {
 }
 
 void tls_stream::write(const char *buf, int length) {
-    if(reading_fiber) throw RTERR("half-duplex stream is read-busy");
     do_handshake();
     if(!_ssl) {
         stream::write(buf, length);

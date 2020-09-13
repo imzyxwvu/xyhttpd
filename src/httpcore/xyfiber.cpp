@@ -6,18 +6,8 @@
 
 using namespace std;
 
-#ifdef _WIN32
-# include <windows.h>
-# include <ctime>
-fiber_context_t fiber::maincontext = NULL;
-#else
 # include <sys/mman.h>
 # include <execinfo.h>
-fiber_context_t fiber::maincontext;
-queue<P<fiber::stack_mem>> fiber::stack_pool;
-#endif
-
-P<fiber> fiber::_current;
 
 std::string fmt(const char *f, ...) {
     va_list ap, ap2;
@@ -42,9 +32,7 @@ std::string timelabel() {
 extended_runtime_error::extended_runtime_error
         (const char *fname, int lno, const string &wh) :
         _filename(fname), _lineno(lno), runtime_error(wh), _depth(0) {
-#ifndef _WIN32
     _depth = backtrace(_btbuf, 20) - 1;
-#endif
 }
 
 const char *extended_runtime_error::filename() {
@@ -60,167 +48,89 @@ int extended_runtime_error::tracedepth() {
     return _depth;
 }
 
-#ifndef _WIN32
-
 char **extended_runtime_error::stacktrace() {
     return backtrace_symbols(_btbuf + 1, _depth);
 }
 
-#else
+ucontext_t fiber::_main_context;
+fiber *fiber::_current;
 
-char **extended_runtime_error::stacktrace() {
-    auto buf = (char **)malloc(sizeof(char *));
-    *buf = NULL;
-    return buf;
-}
-
-#endif
-
-int fiber::stack_pool_target = 32;
-
-#ifndef _WIN32
-
-fiber::stack_mem::stack_mem(int siz) : _size(siz) {
-    _base = (char *)mmap(NULL, _size, PROT_READ | PROT_WRITE,
+fiber::fiber(std::function<void()> entry, size_t stack_size)
+        : _stack_size(stack_size), _entry(std::move(entry)), _terminated(false), _prev(nullptr) {
+    long pagesize = sysconf(_SC_PAGESIZE);
+    if(_stack_size < 8 * pagesize || (_stack_size % pagesize) > 0)
+        throw std::invalid_argument("stack size");
+    _stack = (char *)mmap(nullptr, _stack_size, PROT_READ | PROT_WRITE,
                           MAP_PRIVATE | MAP_ANON, -1, 0);
-    if(!_base) throw std::bad_alloc();
-    mprotect(_base, getpagesize(), PROT_NONE);
-}
+    if(!_stack)
+        throw std::bad_alloc();
+    mprotect(_stack, pagesize, PROT_NONE);
 
-fiber::stack_mem::~stack_mem() {
-    munmap(_base, _size);
-}
-
-fiber::fiber(function<void()> func)
-: _entry(move(func)) {
-    if(stack_pool.empty()) {
-        _stack = make_shared<stack_mem>(0x200000);
-    } else {
-        _stack = stack_pool.front();
-        stack_pool.pop();
+    if(getcontext(&_context) == -1) {
+        munmap(_stack, _stack_size);
+        throw std::runtime_error(strerror(errno));
     }
-    getcontext(&context);
-    context.uc_stack.ss_sp = _stack->base();
-    context.uc_stack.ss_size = _stack->size();
-    context.uc_link = NULL;
-    makecontext(&context, (void(*)(void))fiber::wrapper, 1, this);
-    _terminated = false;
+    _context.uc_stack.ss_sp = _stack;
+    _context.uc_stack.ss_size = _stack_size;
+    _context.uc_link = nullptr;
+    makecontext(&_context, reinterpret_cast<void (*)()>(fiber::_wrapper),1, this);
 }
 
 fiber::~fiber() {
-    if(stack_pool.size() < stack_pool_target)
-        stack_pool.push(_stack);
-}
-
-void fiber::wrapper(fiber *f) {
-    try {
-        f->_entry();
+    if(!_terminated) {
+        std::cerr<<"fatal: non-terminated fiber destructor invoked"<<std::endl;
+        abort();
     }
-    catch(exception &ex) {
-        cerr<<"["<<timelabel()<<" "<<f<<"] "<<ex.what()<<endl;
-    }
-    f->_terminated = true;
-    f->self.reset();
-    swapcontext(&f->context,
-                !f->_prev ? &maincontext : &f->_prev->context);
+    munmap(_stack, _stack_size);
 }
 
-int fiber::yield() {
-    if(!_current)
-        throw RTERR("yielding outside a fiber");
-    P<fiber> self = _current;
-    _current = move(self->_prev);
-    swapcontext(&self->context,
-                !_current ? &maincontext : &_current->context);
-    if(self->_err) {
-        runtime_error ex(*self->_err);
-        self->_err.reset();
-        throw ex;
-    }
-    return self->_event;
-}
-
-void fiber::resume(int event) {
-    if(_terminated || _current == self)
-        throw RTERR("resuming terminated or current fiber");
-    _prev = move(_current);
-    _current = self;
-    _event = event;
-    swapcontext(_prev ? &_prev->context : &maincontext, &context);
-    if(_current && _current->_terminated)
-        _current = move(_current->_prev);
-}
-
-#else
-
-fiber::fiber(function<void()> func)
-        : _entry(move(func)) {
-    if(!maincontext)
-        maincontext = ConvertThreadToFiber(NULL);
-    context = CreateFiber(0x200000, (LPFIBER_START_ROUTINE)fiber::wrapper, this);
-    if(!context) throw runtime_error("failed to create fiber");
-    _terminated = false;
-}
-
-fiber::~fiber() {
-    DeleteFiber(context);
-}
-
-void WINAPI fiber::wrapper(fiber *lpFiberParameter) {
-    fiber *f = (fiber *)GetFiberData();
-    try {
-        f->_entry();
-    }
-    catch(exception &ex) {
-        cerr<<"["<<timelabel()<<" "<<f<<"] "<<ex.what()<<endl;
-    }
-    f->_terminated = true;
-    f->self.reset();
-    SwitchToFiber(!f->_prev ? maincontext : f->_prev->context);
-}
-
-shared_ptr<wakeup_event> fiber::yield() {
-    if(!_current)
-        throw RTERR("yielding outside a fiber");
-    shared_ptr<fiber> self = _current;
-    _current = move(self->_prev);
-    SwitchToFiber(!_current ? maincontext : _current->context);
-    if(self->_err) {
-        runtime_error ex(*self->_err);
-        self->_err.reset();
-        throw ex;
-    }
-    return move(self->_event);
+int fiber::yield(continuation &cont) {
+    cont._pending = _current;
+    swapcontext(&_current->_context,
+                !_current->_prev ? &_main_context : &_current->_prev->_context);
+    return cont._resume_status;
 }
 
 void fiber::resume() {
-    if(_terminated || _current == self)
-        throw RTERR("resuming terminated or current fiber");
-    _prev = move(_current);
-    _current = self;
-    SwitchToFiber(context);
-    if(_current && _current->_terminated)
-        _current = move(_current->_prev);
+    if(_terminated || _current == this) {
+        std::cerr<<"fatal: fiber not yielded (reference retained?)"<<std::endl;
+        abort();
+    }
+    _prev = _current;
+    _current = this;
+    swapcontext(_prev ? &_prev->_context : &_main_context, &_context);
+
+    fiber *previous_current = _prev; // backup member locally
+    if(_terminated)
+        delete this; // commit suicide (`this` invalidated)
+    _current = previous_current;
 }
 
-#endif
-
-P<fiber> fiber::launch(function<void()> entry) {
-    auto f = make_shared<fiber>(move(entry));
-    f->self = f;
-    f->resume(0);
-    return f;
+void fiber::_wrapper(fiber *self) {
+    try {
+        self->_entry();
+    }
+    catch(std::exception &ex) {
+        std::cerr<<timelabel()<<" terminated: "<<ex.what()<<std::endl;
+    }
+    self->_terminated = true;
+    swapcontext(&self->_context,
+                !self->_prev ? &_main_context : &self->_prev->_context);
 }
 
-void fiber::raise(const string &ex) {
-    _err = make_shared<extended_runtime_error>("@fiber", 0, ex);
-    resume(-1);
+void fiber::launch(std::function<void ()> entry, size_t stack_size) {
+    auto *f = new fiber(std::move(entry), stack_size);
+    f->resume();
 }
 
-fiber::preserve::preserve(P<fiber> &f) : _f(f) {
-    _f = fiber::current();
-}
+continuation::continuation() : _pending(nullptr), _resume_status(0) {}
 
-fiber::preserve::~preserve() {
-    _f.reset();
+void continuation::resume(int status) {
+    fiber *pending = _pending;
+    if(!pending) {
+        throw std::runtime_error("no yielded fiber");
+    }
+    _resume_status = status;
+    _pending = nullptr;
+    pending->resume();
 }
